@@ -68,8 +68,10 @@ Verze 0.1.11
 - Popup je větší a čas vložení je vizuálně oddělený od překladu.
 - Velikost popup okna lze táhnout za pravý dolní roh; zvolená velikost se pamatuje.
 
-Experiment (větev experiment)
-5. 11. 2026
-- Nová záložka Statistiky: heatmap kalendář kliknutí a tabulka za období.
+Verze 0.2.0
+5. 11. 2026 10:47
+- Nová záložka Statistiky vedle Slovníku a Nastavení.
+- Statistiky: klasické měsíční kalendáře s malými čtverečky a barvou podle denních kliknutí.
 - Období: 30 dní, tento měsíc, 1/4 roku, půl roku, rok.
-- Logování kliknutí do usage_events; přidáno/upraveno a úrovně 1–K ze slovníku.
+- Tabulka: kliknutí, aktivní dny, průměr, nejaktivnější den, přidáno/upraveno slovíček, úrovně 1–K.
+- Logování kliknutí do usage_events; statistiky se zobrazují jen v záložce Statistiky.
