@@ -28,62 +28,85 @@
         </label>
       </div>
 
-      <form id="settings-form">
-        <label for="api-key">LingQ API klíč</label>
-        <div class="input-wrap">
-          <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
-          <button type="button" id="toggle-key" aria-label="Zobrazit API klíč">Zobrazit</button>
-        </div>
-        <p class="help">API klíč získáte ve svém účtu LingQ v sekci API key.</p>
+      <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
+        <button class="tab tab--active" type="button" role="tab" id="tab-settings" aria-selected="true" aria-controls="panel-settings" data-tab="settings">Nastavení</button>
+        <button class="tab" type="button" role="tab" id="tab-words" aria-selected="false" aria-controls="panel-words" data-tab="words">Slovník</button>
+      </nav>
 
-        <div class="field-grid">
-          <div>
-            <label for="language">Učím se</label>
-            <select id="language">
-              <option value="en">Angličtina</option>
-              <option value="de">Němčina</option>
-              <option value="es">Španělština</option>
-              <option value="fr">Francouzština</option>
-              <option value="it">Italština</option>
-              <option value="pt">Portugalština</option>
-              <option value="ru">Ruština</option>
-              <option value="pl">Polština</option>
-              <option value="ja">Japonština</option>
-              <option value="ko">Korejština</option>
-              <option value="zh">Čínština</option>
-            </select>
+      <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
+        <form id="settings-form">
+          <label for="api-key">LingQ API klíč</label>
+          <div class="input-wrap">
+            <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
+            <button type="button" id="toggle-key" aria-label="Zobrazit API klíč">Zobrazit</button>
           </div>
-          <div>
-            <label for="target-language">Překládat do</label>
-            <select id="target-language">
-              <option value="cs">Čeština</option>
-              <option value="en">Angličtina</option>
-              <option value="de">Němčina</option>
-              <option value="es">Španělština</option>
-              <option value="fr">Francouzština</option>
-              <option value="sk">Slovenština</option>
-              <option value="pl">Polština</option>
-            </select>
+          <p class="help">API klíč získáte ve svém účtu LingQ v sekci API key.</p>
+
+          <div class="field-grid">
+            <div>
+              <label for="language">Učím se</label>
+              <select id="language">
+                <option value="en">Angličtina</option>
+                <option value="de">Němčina</option>
+                <option value="es">Španělština</option>
+                <option value="fr">Francouzština</option>
+                <option value="it">Italština</option>
+                <option value="pt">Portugalština</option>
+                <option value="ru">Ruština</option>
+                <option value="pl">Polština</option>
+                <option value="ja">Japonština</option>
+                <option value="ko">Korejština</option>
+                <option value="zh">Čínština</option>
+              </select>
+            </div>
+            <div>
+              <label for="target-language">Překládat do</label>
+              <select id="target-language">
+                <option value="cs">Čeština</option>
+                <option value="en">Angličtina</option>
+                <option value="de">Němčina</option>
+                <option value="es">Španělština</option>
+                <option value="fr">Francouzština</option>
+                <option value="sk">Slovenština</option>
+                <option value="pl">Polština</option>
+              </select>
+            </div>
           </div>
+
+          <label for="click-count">Bublina vyskočí po</label>
+          <select id="click-count">
+            <option value="1">jednom kliknutí</option>
+            <option value="2">dvou kliknutích</option>
+          </select>
+          <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
+
+          <label for="supabase-url">Supabase URL</label>
+          <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+          <p class="help">Lokální databáze slovíček. LingQ napojení se nemění.</p>
+
+          <label for="supabase-key">Supabase publishable klíč</label>
+          <input id="supabase-key" type="password" placeholder="sb_publishable_…" autocomplete="off" />
+
+          <button class="save-button" type="submit">Uložit nastavení</button>
+          <p class="form-message" id="form-message" role="status"></p>
+        </form>
+      </section>
+
+      <section class="tab-panel" id="panel-words" role="tabpanel" aria-labelledby="tab-words" hidden>
+        <div class="words-toolbar">
+          <label class="sr-only" for="word-search">Hledat slovíčko</label>
+          <input id="word-search" type="search" placeholder="Hledat slovíčko…" autocomplete="off" />
+          <label class="sr-only" for="word-sort">Řazení</label>
+          <select id="word-sort">
+            <option value="alpha-asc">Abeceda A–Z</option>
+            <option value="alpha-desc">Abeceda Z–A</option>
+            <option value="views-desc">Nejvíce kliknutí</option>
+            <option value="views-asc">Nejméně kliknutí</option>
+          </select>
         </div>
-
-        <label for="click-count">Bublina vyskočí po</label>
-        <select id="click-count">
-          <option value="1">jednom kliknutí</option>
-          <option value="2">dvou kliknutích</option>
-        </select>
-        <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
-
-        <label for="supabase-url">Supabase URL</label>
-        <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
-        <p class="help">Lokální databáze slovíček (experiment). LingQ napojení se nemění.</p>
-
-        <label for="supabase-key">Supabase publishable klíč</label>
-        <input id="supabase-key" type="password" placeholder="sb_publishable_…" autocomplete="off" />
-
-        <button class="save-button" type="submit">Uložit nastavení</button>
-        <p class="form-message" id="form-message" role="status"></p>
-      </form>
+        <p class="words-meta" id="words-meta">Načítám slovíčka…</p>
+        <div class="words-list" id="words-list" role="list"></div>
+      </section>
     </main>
     <script src="popup.js"></script>
   </body>

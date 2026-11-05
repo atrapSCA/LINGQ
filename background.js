@@ -76,6 +76,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'LIST_SUPABASE_WORDS') {
+    listSupabaseWords()
+      .then((words) => sendResponse({ ok: true, words }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Slovník se nepodařilo načíst.' }));
+    return true;
+  }
+
   return false;
 });
 
@@ -650,6 +657,33 @@ function queueSupabaseUpdate(fields, settings) {
   syncSupabaseWord('update_word_fields', fields, settings).catch(() => {
     // Aktualizace LingQ už proběhla; databáze se zkusí příště.
   });
+}
+
+async function listSupabaseWords() {
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+  }
+
+  const language = encodeURIComponent(settings.language || 'en');
+  const url = `${baseUrl}/rest/v1/words?select=word,view_count,status,translation,language&language=eq.${language}&order=word.asc&limit=2000`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+  }
+
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function syncSupabaseWord(rpcName, fields, settings) {

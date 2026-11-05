@@ -6,13 +6,13 @@
 }
 
 * { box-sizing: border-box; }
-body { width: 360px; margin: 0; background: #f6f8f7; }
+body { width: 380px; margin: 0; background: #f6f8f7; }
 .panel { overflow: hidden; }
 .header { display: flex; gap: 12px; align-items: center; padding: 20px 20px 17px; background: #18222b; color: #ffffff; }
 .brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #4dbea0; color: #102c2c; font-size: 13px; font-weight: 800; letter-spacing: -0.03em; }
 h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
 .header p { margin: 4px 0 0; color: #b8c5cb; font-size: 11px; line-height: 1.4; }
-.status-card { display: flex; align-items: center; gap: 10px; margin: 16px 16px 20px; padding: 12px; border: 1px solid #d8e4df; border-radius: 10px; background: #ffffff; }
+.status-card { display: flex; align-items: center; gap: 10px; margin: 16px 16px 12px; padding: 12px; border: 1px solid #d8e4df; border-radius: 10px; background: #ffffff; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4dbea0; box-shadow: 0 0 0 4px #e2f4ef; }
 .status-card strong, .status-card span:not(.status-dot) { display: block; }
 .status-card strong { font-size: 12px; }
@@ -23,6 +23,37 @@ h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
 .slider::after { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #87938f; content: ""; transition: transform 160ms ease; }
 .switch input:checked + .slider { background: #4dbea0; }
 .switch input:checked + .slider::after { transform: translateX(14px); }
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 16px 12px;
+  padding: 4px;
+  border: 1px solid #d8e4df;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.tab {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5f7278;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
+.tab--active {
+  background: #18222b;
+  color: #ffffff;
+}
+
+.tab-panel[hidden] { display: none; }
+
 form { padding: 0 20px 18px; }
 label { display: block; margin-bottom: 6px; color: #394b52; font-size: 11px; font-weight: 700; }
 .input-wrap { display: flex; overflow: hidden; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
@@ -37,5 +68,74 @@ label[for="supabase-key"] { margin-top: 14px; }
 select,
 form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
 .save-button { width: 100%; margin-top: 16px; padding: 10px 12px; border: 0; border-radius: 8px; background: #18222b; color: white; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
-.footer { display: flex; gap: 6px; align-items: center; padding: 0 20px 16px; color: #6b7b80; font-size: 10px; }
-.shortcut-badge { padding: 2px 6px; border-radius: 999px; background: #e7efed; color: #394b52; font-weight: 700; }
+
+#panel-words { padding: 0 16px 16px; }
+.words-toolbar { display: grid; gap: 8px; }
+.words-toolbar input,
+.words-toolbar select {
+  padding: 10px 11px;
+  border: 1px solid #c9d6d2;
+  border-radius: 8px;
+  background: white;
+}
+.words-meta { margin: 10px 0 8px; color: #6b7b80; font-size: 10px; }
+.words-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #d8e4df;
+  border-radius: 10px;
+  background: #ffffff;
+}
+.word-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf2f0;
+}
+.word-row:last-child { border-bottom: 0; }
+.word-row__term {
+  overflow: hidden;
+  color: #18222b;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.word-row__views {
+  color: #5f7278;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.word-row__status {
+  display: inline-grid;
+  min-width: 28px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e7efed;
+  color: #294049;
+  font-size: 11px;
+  font-weight: 800;
+}
+.word-row__status--known {
+  background: #f8e7c2;
+  color: #8a5a00;
+}
+.words-empty {
+  padding: 24px 16px;
+  color: #6b7b80;
+  font-size: 12px;
+  text-align: center;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}

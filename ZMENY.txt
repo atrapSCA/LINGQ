@@ -54,3 +54,9 @@ Verze 0.1.09
 - Změna překladu nebo stupně znalosti se propsíše i do Supabase.
 - LingQ napojení beze změny; v popup lze upravit Supabase URL a publishable klíč.
 - V bublině se u dříve viděných slov zobrazí „Viděno N×“ ze Supabase; u prvního záznamu se počet nevypisuje.
+
+Experiment (větev experiment)
+5. 11. 2026
+- Popup má záložky Nastavení a Slovník.
+- Záložka Slovník vypisuje slovíčka ze Supabase: text, počet kliknutí a úroveň 1–4/K.
+- Ve slovníku je hledání a řazení podle abecedy nebo počtu kliknutí.
