@@ -332,7 +332,13 @@ function loadStats(force) {
 }
 
 function renderStats(stats) {
-  const daysMap = new Map((stats.days || []).map((item) => [String(item.day).slice(0, 10), Number(item.clicks) || 0]));
+  const daysMap = new Map((stats.days || []).map((item) => {
+    const raw = item?.day;
+    const key = raw instanceof Date
+      ? toDateKey(raw)
+      : String(raw || '').slice(0, 10);
+    return [key, Number(item.clicks) || 0];
+  }).filter(([key]) => /^\d{4}-\d{2}-\d{2}$/.test(key)));
   const rangeStart = new Date(stats.rangeStart || stats.from);
   const rangeEnd = new Date(stats.rangeEnd || stats.to);
   const dayList = buildDayList(rangeStart, rangeEnd);
@@ -395,7 +401,7 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
   }
 
   const weekCount = cells.length / 7;
-  const weekMeta = [];
+  const weekInfo = [];
   for (let week = 0; week < weekCount; week += 1) {
     const weekDays = [];
     for (let weekday = 0; weekday < 7; weekday += 1) {
@@ -404,53 +410,42 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
         weekDays.push(day);
       }
     }
-    const monthKey = weekDays.length
+    const labelDay = weekDays.find((day) => new Date(`${day}T12:00:00`).getDate() === 1) || weekDays[0] || null;
+    const monthKey = labelDay
       ? (() => {
-        const date = new Date(`${weekDays[0]}T12:00:00`);
+        const date = new Date(`${labelDay}T12:00:00`);
         return `${date.getFullYear()}-${date.getMonth()}`;
       })()
       : '';
-    const prevMonthKey = week > 0 ? weekMeta[week - 1].monthKey : '';
-    const startsMonth = Boolean(monthKey) && (week === 0 || monthKey !== prevMonthKey
-      || weekDays.some((day) => new Date(`${day}T12:00:00`).getDate() === 1));
-    weekMeta.push({ weekDays, monthKey, startsMonth });
-  }
-  for (let week = 0; week < weekCount; week += 1) {
-    const next = weekMeta[week + 1];
-    weekMeta[week].endsMonth = Boolean(weekMeta[week].monthKey)
-      && (!next || next.startsMonth || next.monthKey !== weekMeta[week].monthKey);
-  }
-
-  const heatmapWrap = statsHeatmap.closest('.heatmap-wrap');
-  if (heatmapWrap) {
-    heatmapWrap.style.setProperty('--heatmap-weeks', String(weekCount));
+    const prevMonthKey = week > 0 ? weekInfo[week - 1].monthKey : '';
+    weekInfo.push({
+      weekDays,
+      labelDay,
+      monthKey,
+      isMonthBoundary: Boolean(monthKey) && week > 0 && monthKey !== prevMonthKey,
+      showLabel: Boolean(labelDay) && (week === 0 || monthKey !== prevMonthKey),
+    });
   }
 
   for (let week = 0; week < weekCount; week += 1) {
     const column = document.createElement('div');
     column.className = 'heatmap-week';
-    if (weekMeta[week].startsMonth) {
-      column.classList.add('heatmap-week--month-start');
-    }
-    if (weekMeta[week].endsMonth) {
-      column.classList.add('heatmap-week--month-end');
+    if (weekInfo[week].isMonthBoundary) {
+      column.classList.add('heatmap-week--month-boundary');
     }
 
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const day = cells[week * 7 + weekday];
       const cell = document.createElement(day ? 'button' : 'span');
       if (day) {
-        const count = daysMap.get(day) || 0;
+        const count = Number(daysMap.get(day)) || 0;
         const date = new Date(`${day}T12:00:00`);
         cell.type = 'button';
         cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
-        if (date.getDate() === 1) {
-          cell.classList.add('heat--month-first');
-        }
         cell.title = `${formatShortDate(date)}: ${count}×`;
         cell.setAttribute('aria-label', cell.title);
       } else {
-        cell.className = 'heat heat-empty';
+        cell.className = 'heat heat-pad';
       }
       column.appendChild(cell);
     }
@@ -461,24 +456,15 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
     return;
   }
 
-  let lastMonthKey = '';
   for (let week = 0; week < weekCount; week += 1) {
     const label = document.createElement('span');
     label.className = 'heatmap-month';
-    if (weekMeta[week].startsMonth) {
-      label.classList.add('heatmap-month--start');
+    if (weekInfo[week].isMonthBoundary) {
+      label.classList.add('heatmap-month--boundary');
     }
-    if (weekMeta[week].endsMonth) {
-      label.classList.add('heatmap-month--end');
-    }
-    const anchor = weekMeta[week].weekDays[0];
-    if (anchor) {
-      const date = new Date(`${anchor}T12:00:00`);
-      const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
-      if (monthKey !== lastMonthKey) {
-        label.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'short' }).format(date);
-        lastMonthKey = monthKey;
-      }
+    if (weekInfo[week].showLabel && weekInfo[week].labelDay) {
+      const date = new Date(`${weekInfo[week].labelDay}T12:00:00`);
+      label.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'short' }).format(date);
     }
     statsHeatmapMonths.appendChild(label);
   }
