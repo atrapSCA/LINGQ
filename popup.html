@@ -74,6 +74,13 @@
         </select>
         <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
 
+        <label for="supabase-url">Supabase URL</label>
+        <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+        <p class="help">Lokální databáze slovíček (experiment). LingQ napojení se nemění.</p>
+
+        <label for="supabase-key">Supabase publishable klíč</label>
+        <input id="supabase-key" type="password" placeholder="sb_publishable_…" autocomplete="off" />
+
         <button class="save-button" type="submit">Uložit nastavení</button>
         <p class="form-message" id="form-message" role="status"></p>
       </form>

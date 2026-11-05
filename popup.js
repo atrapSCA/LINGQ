@@ -4,12 +4,16 @@ const DEFAULTS = {
   targetLanguage: 'cs',
   enabled: true,
   clickCount: 1,
+  supabaseUrl: 'https://vsvgxetuilgwhrqnyipd.supabase.co',
+  supabaseKey: 'sb_publishable_xt7bWa2O1LYbohcB4x77ig_E8AXesvc',
 };
 
 const form = document.getElementById('settings-form');
 const apiKeyInput = document.getElementById('api-key');
 const languageInput = document.getElementById('language');
 const targetLanguageInput = document.getElementById('target-language');
+const supabaseUrlInput = document.getElementById('supabase-url');
+const supabaseKeyInput = document.getElementById('supabase-key');
 const enabledInput = document.getElementById('enabled');
 const clickCountInput = document.getElementById('click-count');
 const clickHelp = document.getElementById('click-help');
@@ -23,6 +27,8 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   apiKeyInput.value = settings.apiKey;
   languageInput.value = settings.language;
   targetLanguageInput.value = settings.targetLanguage;
+  supabaseUrlInput.value = settings.supabaseUrl || DEFAULTS.supabaseUrl;
+  supabaseKeyInput.value = settings.supabaseKey || DEFAULTS.supabaseKey;
   enabledInput.checked = settings.enabled;
   clickCountInput.value = Number(settings.clickCount) === 2 ? '2' : '1';
   renderStatus(settings.enabled);
@@ -35,6 +41,8 @@ form.addEventListener('submit', (event) => {
     apiKey: apiKeyInput.value.trim(),
     language: languageInput.value,
     targetLanguage: targetLanguageInput.value,
+    supabaseUrl: supabaseUrlInput.value.trim().replace(/\/$/, ''),
+    supabaseKey: supabaseKeyInput.value.trim(),
   }, () => {
     formMessage.textContent = 'Nastavení bylo uloženo.';
     window.setTimeout(() => { formMessage.textContent = ''; }, 2200);

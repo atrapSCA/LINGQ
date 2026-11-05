@@ -46,3 +46,10 @@ Verze 0.1.08
 4. 11. 2026 19:27
 - V nastavení lze zvolit, jestli bublina vyskočí po jednom, nebo po dvou kliknutích.
 - U odkazů zůstává dvojité kliknutí, aby se stránka neotevřela.
+
+Experiment (větev experiment, zatím bez oficiálního tagu)
+5. 11. 2026
+- Po zobrazení bubliny se slovíčko syncne do Supabase (tabulka words).
+- Nové slovo se vloží, existující zvýší view_count.
+- Změna překladu nebo stupně znalosti se propsíše i do Supabase.
+- LingQ napojení beze změny; v popup lze upravit Supabase URL a publishable klíč.

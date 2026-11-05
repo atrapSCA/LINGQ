@@ -31,8 +31,11 @@ input, select { width: 100%; border: 0; outline: none; background: transparent; 
 #toggle-key { border: 0; border-left: 1px solid #c9d6d2; background: #f3f7f6; color: #394b52; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; padding: 0 10px; }
 .help, .form-message { margin: 6px 0 0; color: #6b7b80; font-size: 10px; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-label[for="click-count"] { margin-top: 14px; }
-select { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
+label[for="click-count"],
+label[for="supabase-url"],
+label[for="supabase-key"] { margin-top: 14px; }
+select,
+form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
 .save-button { width: 100%; margin-top: 16px; padding: 10px 12px; border: 0; border-radius: 8px; background: #18222b; color: white; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
 .footer { display: flex; gap: 6px; align-items: center; padding: 0 20px 16px; color: #6b7b80; font-size: 10px; }
 .shortcut-badge { padding: 2px 6px; border-radius: 999px; background: #e7efed; color: #394b52; font-weight: 700; }

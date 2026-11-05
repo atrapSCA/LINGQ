@@ -1,2 +1,6 @@
 node_modules
 .env
+.env.*
+scripts/setup_supabase_*.py
+scripts/test_rpc.py
+scripts/smoke_supabase.py

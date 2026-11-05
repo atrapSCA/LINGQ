@@ -4,6 +4,8 @@ const DEFAULTS = {
   targetLanguage: 'cs',
   enabled: true,
   clickCount: 1,
+  supabaseUrl: 'https://vsvgxetuilgwhrqnyipd.supabase.co',
+  supabaseKey: 'sb_publishable_xt7bWa2O1LYbohcB4x77ig_E8AXesvc',
 };
 
 function iconPaths(enabled) {
@@ -87,11 +89,10 @@ async function lookupWord(word) {
   const card = await findCard(cleanWord, settings);
   const cardStatus = card ? normalizeStatus(card.status, card.extended_status) : 0;
 
+  let result;
   if (card && cardStatus > 1) {
-    return attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
-  }
-
-  if (await isKnownWord(cleanWord, settings)) {
+    result = await attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
+  } else if (await isKnownWord(cleanWord, settings)) {
     const hint = card ? null : await findHint(cleanWord, settings).catch(() => null);
     const translations = extractTranslations(card?.hints || hint, settings.targetLanguage);
     let cardId = card?.pk ?? card?.id ?? null;
@@ -104,7 +105,7 @@ async function lookupWord(word) {
       }
     }
     rememberKnownWord(cleanWord, settings);
-    return attachMeanings({
+    result = await attachMeanings({
       word: cleanWord,
       translation: translations[0] || 'Překlad není k dispozici.',
       translations,
@@ -113,26 +114,27 @@ async function lookupWord(word) {
       created: false,
       unknown: false,
     }, cleanWord, settings);
+  } else if (card) {
+    result = await attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
+  } else {
+    const hint = await findHint(cleanWord, settings);
+    const translations = extractTranslations(hint, settings.targetLanguage);
+    const translation = translations[0] || 'Překlad nebyl nalezen.';
+    const createdCard = await createCard(cleanWord, translation, settings);
+
+    result = await attachMeanings({
+      word: cleanWord,
+      translation,
+      translations,
+      status: normalizeStatus(createdCard?.status ?? 0, createdCard?.extended_status),
+      cardId: createdCard?.pk ?? createdCard?.id,
+      created: true,
+      unknown: true,
+    }, cleanWord, settings);
   }
 
-  if (card) {
-    return attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
-  }
-
-  const hint = await findHint(cleanWord, settings);
-  const translations = extractTranslations(hint, settings.targetLanguage);
-  const translation = translations[0] || 'Překlad nebyl nalezen.';
-  const createdCard = await createCard(cleanWord, translation, settings);
-
-  return attachMeanings({
-    word: cleanWord,
-    translation,
-    translations,
-    status: normalizeStatus(createdCard?.status ?? 0, createdCard?.extended_status),
-    cardId: createdCard?.pk ?? createdCard?.id,
-    created: true,
-    unknown: true,
-  }, cleanWord, settings);
+  queueSupabaseTouch(result, settings);
+  return result;
 }
 
 async function attachMeanings(result, word, settings) {
@@ -192,6 +194,11 @@ async function updateStatus(cardId, status, word) {
     } else {
       forgetKnownWord(word, settings);
     }
+    queueSupabaseUpdate({
+      word,
+      status: savedStatus,
+      cardId,
+    }, settings);
   }
   return {
     status: savedStatus,
@@ -220,6 +227,11 @@ async function updateTranslation(cardId, word, translation) {
       method: 'PATCH',
       body: JSON.stringify({ hints: [hintId, ...existingIds] }),
     });
+    queueSupabaseUpdate({
+      word,
+      translation: text,
+      cardId,
+    }, settings);
     return { translation: text };
   }
 
@@ -238,6 +250,11 @@ async function updateTranslation(cardId, word, translation) {
     method: 'PATCH',
     body: JSON.stringify({ hints }),
   });
+  queueSupabaseUpdate({
+    word,
+    translation: text,
+    cardId,
+  }, settings);
   return { translation: text };
 }
 
@@ -604,4 +621,70 @@ function normalizeWord(word) {
 
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : 'Nepodařilo se spojit s LingQ.';
+}
+
+function queueSupabaseTouch(result, settings) {
+  if (!result?.word) {
+    return;
+  }
+  syncSupabaseWord('touch_word', {
+    word: result.word,
+    translation: result.translation,
+    status: result.status,
+    cardId: result.cardId,
+  }, settings).catch(() => {
+    // LingQ bublina zůstane, i když sync do Supabase selže.
+  });
+}
+
+function queueSupabaseUpdate(fields, settings) {
+  if (!fields?.word) {
+    return;
+  }
+  syncSupabaseWord('update_word_fields', fields, settings).catch(() => {
+    // Aktualizace LingQ už proběhla; databáze se zkusí příště.
+  });
+}
+
+async function syncSupabaseWord(rpcName, fields, settings) {
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    return null;
+  }
+
+  const payload = {
+    p_word: normalizeWord(fields.word),
+    p_language: settings.language || 'en',
+  };
+  if (fields.translation != null && String(fields.translation).trim()) {
+    payload.p_translation = String(fields.translation).trim();
+  }
+  if (Number.isInteger(Number(fields.status))) {
+    payload.p_status = Number(fields.status);
+  }
+  if (fields.cardId != null && fields.cardId !== '') {
+    const cardId = Number(fields.cardId);
+    if (Number.isFinite(cardId)) {
+      payload.p_lingq_card_id = cardId;
+    }
+  }
+
+  const response = await fetch(`${baseUrl}/rest/v1/rpc/${rpcName}`, {
+    method: 'POST',
+    headers: {
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
