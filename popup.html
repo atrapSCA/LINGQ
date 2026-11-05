@@ -29,11 +29,11 @@
       </div>
 
       <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
-        <button class="tab tab--active" type="button" role="tab" id="tab-settings" aria-selected="true" aria-controls="panel-settings" data-tab="settings">Nastavení</button>
-        <button class="tab" type="button" role="tab" id="tab-words" aria-selected="false" aria-controls="panel-words" data-tab="words">Slovník</button>
+        <button class="tab tab--active" type="button" role="tab" id="tab-words" aria-selected="true" aria-controls="panel-words" data-tab="words">Slovník</button>
+        <button class="tab" type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-tab="settings">Nastavení</button>
       </nav>
 
-      <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
+      <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
         <form id="settings-form">
           <label for="api-key">LingQ API klíč</label>
           <div class="input-wrap">
@@ -92,7 +92,7 @@
         </form>
       </section>
 
-      <section class="tab-panel" id="panel-words" role="tabpanel" aria-labelledby="tab-words" hidden>
+      <section class="tab-panel" id="panel-words" role="tabpanel" aria-labelledby="tab-words">
         <div class="words-toolbar">
           <label class="sr-only" for="word-search">Hledat slovíčko</label>
           <input id="word-search" type="search" placeholder="Hledat slovíčko…" autocomplete="off" />

@@ -58,5 +58,5 @@ Verze 0.1.09
 Experiment (větev experiment)
 5. 11. 2026
 - Popup má záložky Nastavení a Slovník.
-- Záložka Slovník vypisuje slovíčka ze Supabase: text, počet kliknutí a úroveň 1–4/K.
+- Záložka Slovník je první a výchozí; vypisuje slovíčka ze Supabase včetně překladu, počtu kliknutí a úrovně 1–4/K.
 - Ve slovníku je hledání a řazení podle abecedy nebo počtu kliknutí.

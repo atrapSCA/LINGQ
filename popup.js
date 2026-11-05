@@ -44,6 +44,7 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   clickCountInput.value = Number(settings.clickCount) === 2 ? '2' : '1';
   renderStatus(settings.enabled);
   renderClickHelp(clickCountInput.value);
+  activateTab('words');
 });
 
 tabButtons.forEach((button) => {
@@ -155,7 +156,11 @@ function renderWords() {
   let items = allWords.slice();
 
   if (query) {
-    items = items.filter((item) => String(item.word || '').toLowerCase().includes(query));
+    items = items.filter((item) => {
+      const word = String(item.word || '').toLowerCase();
+      const translation = String(item.translation || '').toLowerCase();
+      return word.includes(query) || translation.includes(query);
+    });
   }
 
   items.sort((left, right) => {
@@ -196,10 +201,22 @@ function renderWords() {
     row.className = 'word-row';
     row.setAttribute('role', 'listitem');
 
+    const main = document.createElement('div');
+    main.className = 'word-row__main';
+
     const term = document.createElement('span');
     term.className = 'word-row__term';
     term.textContent = item.word || '';
-    term.title = item.translation || item.word || '';
+
+    const translation = document.createElement('span');
+    translation.className = 'word-row__translation';
+    const translationText = String(item.translation || '').trim();
+    translation.textContent = translationText || 'Bez překladu';
+    if (!translationText) {
+      translation.classList.add('word-row__translation--empty');
+    }
+
+    main.append(term, translation);
 
     const views = document.createElement('span');
     views.className = 'word-row__views';
@@ -212,7 +229,7 @@ function renderWords() {
     status.textContent = statusLabel;
     status.title = `Úroveň znalosti ${statusLabel}`;
 
-    row.append(term, views, status);
+    row.append(main, views, status);
     wordsList.appendChild(row);
   });
 }

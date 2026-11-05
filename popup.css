@@ -95,6 +95,11 @@ form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px
   border-bottom: 1px solid #edf2f0;
 }
 .word-row:last-child { border-bottom: 0; }
+.word-row__main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
 .word-row__term {
   overflow: hidden;
   color: #18222b;
@@ -102,6 +107,18 @@ form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.word-row__translation {
+  overflow: hidden;
+  color: #5f7278;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.word-row__translation--empty {
+  color: #9aabaf;
+  font-style: italic;
 }
 .word-row__views {
   color: #5f7278;
