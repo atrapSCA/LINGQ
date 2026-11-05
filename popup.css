@@ -120,6 +120,14 @@ form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px
   color: #9aabaf;
   font-style: italic;
 }
+.word-row__dates {
+  overflow: hidden;
+  color: #8a9aa0;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .word-row__views {
   color: #5f7278;
   font-size: 11px;

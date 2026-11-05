@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS public.words (
   CONSTRAINT words_word_language_unique UNIQUE (word, language)
 );
 
+-- created_at = kdy bylo slovíčko vloženo
+-- updated_at = kdy bylo naposledy editované (překlad / úroveň), ne při pouhém zobrazení
+ALTER TABLE public.words
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE public.words
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS words_word_language_idx ON public.words (lower(word), language);
 
 ALTER TABLE public.words ENABLE ROW LEVEL SECURITY;
@@ -45,21 +53,29 @@ BEGIN
     RAISE EXCEPTION 'word is required';
   END IF;
 
-  INSERT INTO public.words AS w (word, language, translation, status, view_count, lingq_card_id)
+  INSERT INTO public.words AS w (word, language, translation, status, view_count, lingq_card_id, created_at, updated_at)
   VALUES (
     normalized,
     COALESCE(NULLIF(btrim(p_language), ''), 'en'),
     NULLIF(btrim(COALESCE(p_translation, '')), ''),
     COALESCE(p_status, 1),
     1,
-    p_lingq_card_id
+    p_lingq_card_id,
+    now(),
+    now()
   )
   ON CONFLICT (word, language) DO UPDATE SET
     view_count = w.view_count + 1,
     translation = COALESCE(EXCLUDED.translation, w.translation),
     status = COALESCE(EXCLUDED.status, w.status),
     lingq_card_id = COALESCE(EXCLUDED.lingq_card_id, w.lingq_card_id),
-    updated_at = now()
+    updated_at = CASE
+      WHEN (EXCLUDED.translation IS NOT NULL AND EXCLUDED.translation IS DISTINCT FROM w.translation)
+        OR (EXCLUDED.status IS NOT NULL AND EXCLUDED.status IS DISTINCT FROM w.status)
+        OR (EXCLUDED.lingq_card_id IS NOT NULL AND EXCLUDED.lingq_card_id IS DISTINCT FROM w.lingq_card_id)
+      THEN now()
+      ELSE w.updated_at
+    END
   RETURNING * INTO result;
 
   RETURN result;
@@ -85,20 +101,28 @@ BEGIN
     RAISE EXCEPTION 'word is required';
   END IF;
 
-  INSERT INTO public.words AS w (word, language, translation, status, view_count, lingq_card_id)
+  INSERT INTO public.words AS w (word, language, translation, status, view_count, lingq_card_id, created_at, updated_at)
   VALUES (
     normalized,
     COALESCE(NULLIF(btrim(p_language), ''), 'en'),
     NULLIF(btrim(COALESCE(p_translation, '')), ''),
     COALESCE(p_status, 1),
     0,
-    p_lingq_card_id
+    p_lingq_card_id,
+    now(),
+    now()
   )
   ON CONFLICT (word, language) DO UPDATE SET
     translation = COALESCE(EXCLUDED.translation, w.translation),
     status = COALESCE(EXCLUDED.status, w.status),
     lingq_card_id = COALESCE(EXCLUDED.lingq_card_id, w.lingq_card_id),
-    updated_at = now()
+    updated_at = CASE
+      WHEN (EXCLUDED.translation IS NOT NULL AND EXCLUDED.translation IS DISTINCT FROM w.translation)
+        OR (EXCLUDED.status IS NOT NULL AND EXCLUDED.status IS DISTINCT FROM w.status)
+        OR (EXCLUDED.lingq_card_id IS NOT NULL AND EXCLUDED.lingq_card_id IS DISTINCT FROM w.lingq_card_id)
+      THEN now()
+      ELSE w.updated_at
+    END
   RETURNING * INTO result;
 
   RETURN result;

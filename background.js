@@ -668,7 +668,7 @@ async function listSupabaseWords() {
   }
 
   const language = encodeURIComponent(settings.language || 'en');
-  const url = `${baseUrl}/rest/v1/words?select=word,view_count,status,translation,language&language=eq.${language}&order=word.asc&limit=2000`;
+  const url = `${baseUrl}/rest/v1/words?select=word,view_count,status,translation,language,created_at,updated_at&language=eq.${language}&order=word.asc&limit=2000`;
   const response = await fetch(url, {
     method: 'GET',
     headers: {

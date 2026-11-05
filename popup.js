@@ -216,7 +216,18 @@ function renderWords() {
       translation.classList.add('word-row__translation--empty');
     }
 
+    const dates = document.createElement('span');
+    dates.className = 'word-row__dates';
+    const created = formatDateTime(item.created_at);
+    const updated = formatDateTime(item.updated_at);
+    dates.textContent = created
+      ? (updated && updated !== created ? `Vloženo ${created} · Upraveno ${updated}` : `Vloženo ${created}`)
+      : '';
+
     main.append(term, translation);
+    if (dates.textContent) {
+      main.append(dates);
+    }
 
     const views = document.createElement('span');
     views.className = 'word-row__views';
@@ -243,4 +254,21 @@ function formatStatus(status) {
     return String(value);
   }
   return '1';
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return new Intl.DateTimeFormat('cs-CZ', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
