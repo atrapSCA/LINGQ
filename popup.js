@@ -401,9 +401,8 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
   }
   statsHeatmap.style.setProperty('--heatmap-weeks', String(weekCount));
 
+  // Buňky jdou po sloupcích (týdnech): Po..Ne dolů, další týden vpravo.
   for (let week = 0; week < weekCount; week += 1) {
-    const column = document.createElement('div');
-    column.className = 'heatmap-week';
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const day = cells[week * 7 + weekday];
       const cell = document.createElement(day ? 'button' : 'span');
@@ -416,9 +415,8 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
       } else {
         cell.className = 'heat heat-empty';
       }
-      column.appendChild(cell);
+      statsHeatmap.appendChild(cell);
     }
-    statsHeatmap.appendChild(column);
   }
 
   if (!statsHeatmapMonths) {
