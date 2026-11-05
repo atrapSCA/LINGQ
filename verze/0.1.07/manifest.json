@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "LingQ Click Translator",
+  "version": "0.1.07",
+  "description": "Click any word on any web page to look up or create a LingQ and see its translation as a tooltip.",
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": [
+    "https://www.lingq.com/*",
+    "https://lingq.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/on-16.png",
+    "32": "icons/on-32.png",
+    "48": "icons/on-48.png",
+    "128": "icons/on-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/on-16.png",
+      "32": "icons/on-32.png",
+      "48": "icons/on-48.png",
+      "128": "icons/on-128.png"
+    },
+    "default_popup": "popup.html",
+    "default_title": "LingQ Click Translator"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

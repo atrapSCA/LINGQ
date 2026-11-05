@@ -1,0 +1,441 @@
+const TOOLTIP_ID = 'lingq-click-translator-tooltip';
+const WORD_PATTERN = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/u;
+const STATUS_LEVELS = [['1', 1], ['2', 2], ['3', 3], ['4', 4], ['K', 5]];
+let enabled = true;
+let activeRequest = 0;
+let phraseSelectionActive = false;
+let tooltip;
+
+chrome.storage.sync.get({ enabled: true }, (settings) => {
+  enabled = settings.enabled;
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'sync' && changes.enabled) {
+    enabled = changes.enabled.newValue;
+  }
+});
+
+document.addEventListener('mouseup', handlePhraseSelection, true);
+document.addEventListener('click', handleClick, true);
+window.addEventListener('scroll', hideTooltip, { passive: true });
+window.addEventListener('resize', hideTooltip, { passive: true });
+
+document.addEventListener('click', (event) => {
+  if (phraseSelectionActive) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Element && !target.closest(`#${TOOLTIP_ID}`)) {
+    hideTooltip();
+  }
+}, false);
+
+function handlePhraseSelection(event) {
+  if (!enabled || event.button !== 0) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof Element) || target.closest(`#${TOOLTIP_ID}`) || target.closest('input, textarea, select, [contenteditable="true"]')) {
+    return;
+  }
+
+  const selected = getSelectedPhrase();
+  if (!selected) {
+    return;
+  }
+
+  phraseSelectionActive = true;
+  window.setTimeout(() => {
+    phraseSelectionActive = false;
+  }, 0);
+
+  const requestId = ++activeRequest;
+  showPhraseTooltip(selected.text, selected.rect, 'Překládám větu…', 'loading');
+  chrome.runtime.sendMessage({ type: 'TRANSLATE_PHRASE', text: selected.text }, (response) => {
+    if (requestId !== activeRequest) {
+      return;
+    }
+    if (chrome.runtime.lastError || !response?.ok) {
+      showPhraseTooltip(selected.text, selected.rect, response?.error || 'Překlad věty se nezdařil.', 'error');
+      return;
+    }
+    showPhraseTooltip(selected.text, selected.rect, response.translation, 'ready');
+  });
+}
+
+function handleClick(event) {
+  if (phraseSelectionActive) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  if (!enabled || event.button !== 0) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof Element) || target.closest(`#${TOOLTIP_ID}`)) {
+    return;
+  }
+
+  const anchor = target.closest('a');
+  if (anchor) {
+    if (event.detail === 2) {
+      event.preventDefault();
+      event.stopPropagation();
+      lookupFromPoint(event.clientX, event.clientY, target, event);
+    }
+    return;
+  }
+
+  if (event.detail !== 1) {
+    return;
+  }
+
+  lookupFromPoint(event.clientX, event.clientY, target, event);
+}
+
+function lookupFromPoint(clientX, clientY, target, event) {
+  const selection = getWordSelection(clientX, clientY, target);
+  if (!selection) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  const requestId = ++activeRequest;
+  showTooltip(selection.word, selection.rect, 'Překládám slovo…', 'loading', 0, null, []);
+
+  chrome.runtime.sendMessage({ type: 'LOOKUP_WORD', word: selection.word }, (response) => {
+    if (requestId !== activeRequest) {
+      return;
+    }
+    if (chrome.runtime.lastError || !response?.ok) {
+      showTooltip(selection.word, selection.rect, response?.error || 'Spojení s LingQ se nezdařilo.', 'error', 0, null, []);
+      return;
+    }
+    const kind = response.unknown ? 'unknown' : 'known';
+    showTooltip(selection.word, selection.rect, response.translation, kind, response.status, response.cardId, response.translations || [response.translation]);
+  });
+}
+
+function getSelectedPhrase() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const text = selection.toString().replace(/\s+/g, ' ').trim();
+  const words = text.match(/[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/gu) || [];
+  if (words.length < 2) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  return { text: text.slice(0, 600), rect: range.getBoundingClientRect() };
+}
+
+function showPhraseTooltip(sentence, rect, translation, state) {
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = TOOLTIP_ID;
+    tooltip.setAttribute('role', 'status');
+    document.documentElement.appendChild(tooltip);
+  }
+
+  tooltip.className = `lingq-tooltip lingq-tooltip--phrase lingq-tooltip--phrase-${state}`;
+  tooltip.dataset.sentence = sentence;
+  tooltip.dataset.cardId = '';
+  tooltip.dataset.translation = '';
+  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__sentence"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__phrase-translation"></span><button class="lingq-tooltip__copy" type="button">Kopírovat větu</button>';
+  tooltip.querySelector('.lingq-tooltip__sentence').textContent = sentence;
+  tooltip.querySelector('.lingq-tooltip__phrase-translation').textContent = translation;
+  tooltip.querySelector('.lingq-tooltip__close').addEventListener('click', hideTooltip);
+  tooltip.querySelector('.lingq-tooltip__copy').addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    copySentence(sentence, event.currentTarget);
+  });
+
+  placeTooltip(rect);
+}
+
+function copySentence(sentence, button) {
+  const done = () => {
+    button.textContent = 'Zkopírováno';
+  };
+  const fallback = () => {
+    const area = document.createElement('textarea');
+    area.value = sentence;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.left = '-9999px';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    if (!copied) {
+      button.textContent = 'Kopírování se nezdařilo';
+      return;
+    }
+    done();
+  };
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(sentence).then(done).catch(fallback);
+    return;
+  }
+  fallback();
+}
+
+function getWordSelection(clientX, clientY, target) {
+  const range = document.caretRangeFromPoint?.(clientX, clientY) || document.caretPositionFromPoint && getRangeFromCaretPosition(clientX, clientY);
+  if (!range || !target.contains(range.startContainer)) {
+    return null;
+  }
+
+  const textNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer : range.startContainer.childNodes[range.startOffset];
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
+
+  const text = textNode.textContent || '';
+  const offset = range.startOffset;
+  const wordStart = findWordStart(text, offset);
+  const wordEnd = findWordEnd(text, offset);
+  const word = text.slice(wordStart, wordEnd).match(WORD_PATTERN)?.[0];
+  if (!word) {
+    return null;
+  }
+
+  const wordRange = document.createRange();
+  wordRange.setStart(textNode, wordStart);
+  wordRange.setEnd(textNode, wordEnd);
+  return { word, rect: wordRange.getBoundingClientRect() };
+}
+
+function getRangeFromCaretPosition(clientX, clientY) {
+  const position = document.caretPositionFromPoint(clientX, clientY);
+  if (!position) {
+    return null;
+  }
+  const range = document.createRange();
+  range.setStart(position.offsetNode, position.offset);
+  range.collapse(true);
+  return range;
+}
+
+function findWordStart(text, offset) {
+  let index = Math.min(offset, text.length - 1);
+  while (index > 0 && isWordCharacter(text[index - 1])) index -= 1;
+  return index;
+}
+
+function findWordEnd(text, offset) {
+  let index = Math.max(offset, 0);
+  while (index < text.length && isWordCharacter(text[index])) index += 1;
+  return index;
+}
+
+function isWordCharacter(character) {
+  return /[\p{L}\p{M}\p{N}'’\-]/u.test(character);
+}
+
+function showTooltip(word, rect, translation, kind, status, cardId, translations) {
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = TOOLTIP_ID;
+    tooltip.setAttribute('role', 'status');
+    document.documentElement.appendChild(tooltip);
+  }
+
+  tooltip.className = `lingq-tooltip lingq-tooltip--${kind}`;
+  tooltip.dataset.word = word;
+  tooltip.dataset.translation = kind === 'loading' || kind === 'error' ? '' : translation;
+  tooltip.dataset.cardId = cardId ? String(cardId) : '';
+  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button">Další překlady</button><div class="lingq-tooltip__alternative-list" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
+  tooltip.querySelector('.lingq-tooltip__word').textContent = word;
+  const translationElement = tooltip.querySelector('.lingq-tooltip__translation');
+  translationElement.textContent = translation;
+  if (cardId && kind !== 'loading' && kind !== 'error') {
+    enableTranslationEditing(translationElement);
+  }
+  tooltip.querySelector('.lingq-tooltip__close').addEventListener('click', hideTooltip);
+
+  const levels = tooltip.querySelector('.lingq-tooltip__levels');
+  if (kind !== 'loading' && kind !== 'error') {
+    STATUS_LEVELS.forEach(([label, value]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `lingq-level lingq-level--${value === Number(status) ? 'active' : 'empty'}`;
+      if (value === 5) {
+        button.classList.add('lingq-level--known');
+      }
+      button.textContent = label;
+      button.title = `Nastavit úroveň ${label}`;
+      button.addEventListener('click', () => changeStatus(value));
+      levels.appendChild(button);
+    });
+  }
+
+  const alternativeButton = tooltip.querySelector('.lingq-tooltip__alternatives');
+  const alternativeList = tooltip.querySelector('.lingq-tooltip__alternative-list');
+  const alternatives = (translations || []).filter((item) => item && item !== translation);
+  if (alternatives.length === 0 || kind === 'loading' || kind === 'error') {
+    alternativeButton.hidden = true;
+  } else {
+    alternativeButton.addEventListener('click', () => {
+      alternativeList.hidden = !alternativeList.hidden;
+      alternativeButton.textContent = alternativeList.hidden ? 'Další překlady' : 'Skrýt překlady';
+    });
+    alternatives.forEach((alternative) => {
+      const item = document.createElement('div');
+      item.className = 'lingq-tooltip__alternative';
+      item.textContent = alternative;
+      alternativeList.appendChild(item);
+    });
+  }
+
+  placeTooltip(rect);
+}
+
+function placeTooltip(rect) {
+  tooltip.style.display = 'block';
+  const left = Math.max(12, Math.min(window.innerWidth - tooltip.offsetWidth - 12, rect.left + rect.width / 2 - tooltip.offsetWidth / 2));
+  const top = rect.top > 110 ? rect.top - tooltip.offsetHeight - 12 : rect.bottom + 12;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${Math.max(12, top)}px`;
+}
+
+function enableTranslationEditing(element) {
+  element.classList.add('lingq-tooltip__translation--editable');
+  element.title = 'Kliknutím upravíte překlad';
+  element.spellcheck = true;
+
+  element.addEventListener('click', () => {
+    if (element.getAttribute('contenteditable') === 'true') {
+      return;
+    }
+    element.contentEditable = 'true';
+    element.classList.add('lingq-tooltip__translation--editing');
+    element.focus();
+  });
+
+  element.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      element.blur();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      element.textContent = tooltip.dataset.translation || '';
+      element.blur();
+    }
+  });
+
+  element.addEventListener('input', () => {
+    window.clearTimeout(element.saveTimer);
+    element.saveTimer = window.setTimeout(() => saveTranslation(element), 700);
+  });
+
+  element.addEventListener('blur', () => {
+    window.clearTimeout(element.saveTimer);
+    element.contentEditable = 'false';
+    element.classList.remove('lingq-tooltip__translation--editing');
+    saveTranslation(element);
+  });
+}
+
+let translationSaveRequest = 0;
+let pendingTranslation = '';
+
+function saveTranslation(element) {
+  const next = (element.textContent || '').replace(/\s+/g, ' ').trim();
+  const saved = (tooltip?.dataset.translation || '').trim();
+  if (!next) {
+    element.textContent = saved;
+    return;
+  }
+  if (next === saved || next === pendingTranslation) {
+    return;
+  }
+
+  const cardId = tooltip?.dataset.cardId || '';
+  const word = tooltip?.dataset.word || '';
+  if (!cardId) {
+    showTooltipMessage('LingQ nevrátil identifikátor karty.');
+    return;
+  }
+
+  pendingTranslation = next;
+  const requestId = ++translationSaveRequest;
+  showTooltipMessage('Ukládám překlad…');
+  chrome.runtime.sendMessage({ type: 'UPDATE_TRANSLATION', cardId, word, translation: next }, (response) => {
+    if (requestId !== translationSaveRequest) {
+      return;
+    }
+    if (pendingTranslation === next) {
+      pendingTranslation = '';
+    }
+    if (chrome.runtime.lastError || !response?.ok) {
+      showTooltipMessage(response?.error || 'Překlad se nepodařilo uložit.');
+      return;
+    }
+
+    const stored = response.translation || next;
+    tooltip.dataset.translation = stored;
+    if (element.getAttribute('contenteditable') !== 'true') {
+      element.textContent = stored;
+    }
+    showTooltipMessage('Překlad uložen.');
+  });
+}
+
+function changeStatus(status) {
+  const cardId = tooltip?.dataset.cardId || '';
+  if (!cardId) {
+    showTooltipMessage('LingQ nevrátil identifikátor karty.');
+    return;
+  }
+
+  const buttons = [...tooltip.querySelectorAll('.lingq-level')];
+  buttons.forEach((button) => { button.disabled = true; });
+  showTooltipMessage('Ukládám úroveň…');
+
+  chrome.runtime.sendMessage({ type: 'UPDATE_STATUS', cardId, status }, (response) => {
+    if (chrome.runtime.lastError || !response?.ok) {
+      buttons.forEach((button) => { button.disabled = false; });
+      showTooltipMessage(response?.error || 'Úroveň se nepodařilo uložit.');
+      return;
+    }
+
+    if (response.cardId) {
+      tooltip.dataset.cardId = String(response.cardId);
+    }
+    buttons.forEach((button, index) => {
+      const value = STATUS_LEVELS[index][1];
+      button.className = `lingq-level lingq-level--${value === Number(response.status) ? 'active' : 'empty'}`;
+      if (value === 5) {
+        button.classList.add('lingq-level--known');
+      }
+      button.disabled = false;
+    });
+    showTooltipMessage('Úroveň uložena.');
+  });
+}
+
+function showTooltipMessage(message) {
+  const messageElement = tooltip?.querySelector('.lingq-tooltip__message');
+  if (messageElement) {
+    messageElement.textContent = message;
+  }
+}
+
+function hideTooltip() {
+  if (tooltip) {
+    tooltip.style.display = 'none';
+  }
+}

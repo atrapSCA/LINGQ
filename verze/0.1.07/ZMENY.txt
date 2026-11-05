@@ -1,0 +1,41 @@
+LingQ Click Translator — změny verzí
+
+Další úprava zvýší poslední číslo verze: 0.1.01, 0.1.02, 0.1.03…
+Uložené verze jsou ve složce verze. Obnova: powershell -File obnov-verzi.ps1 -Verze 0.1.02
+
+Verze 0.1.01
+4. 11. 2026 18:25
+- Číslo verze doplňku změněno z 1.0.0 na 0.1.01.
+- Přidán soubor ZMENY.txt. Ke každé další verzi se sem zapíše datum, čas a odrážky s tím, co se změnilo.
+
+Verze 0.1.02
+4. 11. 2026 18:40
+- Výběr dvou a více slov otevře bublinu s vybranou větou a na dalším řádku s jejím překladem.
+- V bublině věty je tlačítko pro zkopírování originálu do schránky.
+- U vybrané věty se nezobrazuje úroveň znalosti.
+
+Verze 0.1.03
+4. 11. 2026 18:52
+- Zapnuto ukládání verzí do složky verze. Verze 0.1.02 je první uložený snímek.
+- Přidány skripty uloz-verzi.ps1 a obnov-verzi.ps1 pro uložení a obnovu verze.
+
+Verze 0.1.04
+4. 11. 2026 18:59
+- Známé slovo (K) se už nezakládá znovu jako neznámé se stupněm 1.
+- Vyhledání karty zahrnuje všechny stupně a u shody bere nejvyšší znalost, včetně K.
+- Slovo vedené v LingQ jako známé, i když nemá kartu, se v bublině označí jako K.
+
+Verze 0.1.05
+4. 11. 2026 19:06
+- Ikona doplňku v Chrome je zelená, když je doplněk zapnutý.
+- Ikona je šedá, když je doplněk vypnutý.
+
+Verze 0.1.06
+4. 11. 2026 19:11
+- Slovo, které je v LingQ známé (K), se už nezakládá jako nové a nezobrazuje se světle modře se stupněm 1.
+- Známá slova se načítají ze seznamu known words a v bublině mají stupeň K.
+
+Verze 0.1.07
+4. 11. 2026 19:19
+- V sekci Další překlady jsou synonyma jednoho významu na jednom řádku a další význam na řádku pod ním.
+- U každého řádku je tlačítko +, které přidá význam k překladu nahoře a uloží ho do LingQ.

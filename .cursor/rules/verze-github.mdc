@@ -1,0 +1,26 @@
+---
+description: Verzování doplňku přes Git a GitHub (commity, tagy, push)
+alwaysApply: true
+---
+
+# Verze a GitHub
+
+Po každé hotové úpravě vytvoř novou verzi a ulož ji na GitHub.
+
+## Číslování
+
+- Formát: `0.1.XX` (poslední číslo +1), např. `0.1.08` → `0.1.09`
+- Změň `"version"` v `manifest.json`
+- Doplň do `ZMENY.txt` blok: `Verze X.Y.ZZ`, datum/čas, odrážky změn
+
+## Uložení verze
+
+1. Spusť `powershell -File uloz-verzi.ps1` (commit + tag `vX.Y.ZZ` + push), nebo stejné kroky ručně přes git
+2. Nepřidávej nové snímky do složky `verze/` — historické složky nech být, nové verze jen GitHub
+3. Commit message: krátký popis změn (proč), tag: `v` + číslo z manifestu (např. `v0.1.09`)
+4. Po uložení vždy `git push` a `git push --tags` na `origin`
+
+## Obnova
+
+- `git checkout v0.1.08` (nebo `powershell -File obnov-verzi.ps1 -Verze 0.1.08`)
+- Starší snímky ve `verze/` slouží jen jako záloha před přechodem na GitHub

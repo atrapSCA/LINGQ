@@ -1,0 +1,304 @@
+#lingq-click-translator-tooltip {
+  all: initial;
+  position: fixed;
+  z-index: 2147483647;
+  display: none;
+  min-width: 170px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 12px 14px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #18222b;
+  box-shadow: 0 12px 30px rgba(8, 15, 22, 0.3);
+  color: #f7fbfc;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-height: 18px;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__word {
+  display: block;
+  margin-bottom: 3px;
+  color: #91d6c5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__translation {
+  display: block;
+  padding-right: 18px;
+  font-weight: 600;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__translation--editable {
+  cursor: text;
+  border-radius: 6px;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__translation--editable:hover {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__translation--editing {
+  margin-right: 18px;
+  padding: 2px 6px;
+  outline: 2px solid #8ec9e5;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__levels {
+  display: flex;
+  gap: 5px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+#lingq-click-translator-tooltip .lingq-level {
+  min-width: 30px;
+  height: 27px;
+  padding: 0 7px;
+  border: 1px solid #62727a;
+  border-radius: 999px;
+  background: transparent;
+  color: #dbe5e8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 25px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+#lingq-click-translator-tooltip .lingq-level:hover:not(:disabled) {
+  border-color: #8bd7c4;
+  color: #ffffff;
+}
+
+#lingq-click-translator-tooltip .lingq-level--active {
+  border-color: #4dbea0;
+  background: #4dbea0;
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip .lingq-level--known {
+  min-width: 34px;
+  border-color: #f0b84e;
+  background: transparent;
+  color: #f0b84e;
+}
+
+#lingq-click-translator-tooltip .lingq-level--known.lingq-level--active {
+  border-color: #f0b84e;
+  background: #f0b84e;
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip .lingq-level--known:hover:not(:disabled) {
+  border-color: #f0b84e;
+  background: #f0b84e;
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip .lingq-level:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__alternatives {
+  display: block;
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8ec9e5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__alternatives:hover {
+  color: #c7ebf8;
+  text-decoration: underline;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__alternative-list {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__alternative {
+  padding: 3px 0;
+  color: #d9e8ed;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__message {
+  display: block;
+  min-height: 15px;
+  margin-top: 7px;
+  color: #b8c5cb;
+  font-size: 10px;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__close {
+  all: unset;
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 20px;
+  height: 20px;
+  color: #9caeb7;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 20px;
+  text-align: center;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__close:hover {
+  color: #ffffff;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--phrase {
+  min-width: 220px;
+  max-width: min(440px, calc(100vw - 24px));
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__sentence {
+  display: block;
+  padding-right: 18px;
+  color: #f7fbfc;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__phrase-translation {
+  display: block;
+  margin-top: 6px;
+  color: #91d6c5;
+  font-weight: 600;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--phrase-loading .lingq-tooltip__phrase-translation,
+#lingq-click-translator-tooltip.lingq-tooltip--phrase-error .lingq-tooltip__phrase-translation {
+  color: #b8c5cb;
+  font-weight: 500;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__copy {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #4dbea0;
+  color: #102c2c;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__copy:hover {
+  background: #6ed0b4;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--loading .lingq-tooltip__translation {
+  color: #b8c5cb;
+  font-weight: 500;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown {
+  border: 2px solid #2f8fd0;
+  background: #d7f1ff;
+  box-shadow: 0 0 0 4px rgba(79, 176, 232, 0.45), 0 14px 32px rgba(24, 92, 140, 0.28);
+  color: #123044;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__word {
+  color: #0b6cab;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__translation {
+  color: #102838;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__translation--editable:hover {
+  box-shadow: inset 0 -1px 0 rgba(11, 108, 171, 0.45);
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__translation--editing {
+  outline-color: #1d7ab8;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__levels {
+  border-top-color: rgba(24, 110, 168, 0.22);
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level {
+  border-color: #7eb6d6;
+  color: #1a4f73;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level:hover:not(:disabled) {
+  border-color: #1d7ab8;
+  background: #b9e4fb;
+  color: #0d3f60;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__alternatives {
+  color: #0b6cab;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__alternatives:hover {
+  color: #084e7c;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__alternative-list {
+  border-top-color: rgba(24, 110, 168, 0.2);
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__alternative {
+  color: #1a4f73;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__message {
+  color: #1d6394;
+  font-weight: 700;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__close {
+  color: #3d7ea8;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__close:hover {
+  color: #0d3f60;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--error {
+  border-color: rgba(244, 145, 120, 0.6);
+  background: #2a2020;
+}
+
+#lingq-click-translator-tooltip.lingq-tooltip--error .lingq-tooltip__translation {
+  color: #ffd6cc;
+  font-weight: 500;
+}

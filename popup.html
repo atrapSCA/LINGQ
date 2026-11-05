@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LingQ Click Translator</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div class="brand-mark">LQ</div>
+        <div>
+          <h1>LingQ Click Translator</h1>
+          <p>Klikněte na slovo a uvidíte překlad</p>
+        </div>
+      </header>
+
+      <div class="status-card">
+        <span class="status-dot" id="status-dot"></span>
+        <div>
+          <strong id="status-title">Doplněk je aktivní</strong>
+          <span id="status-description">Funguje na všech webových stránkách</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="enabled" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <form id="settings-form">
+        <label for="api-key">LingQ API klíč</label>
+        <div class="input-wrap">
+          <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
+          <button type="button" id="toggle-key" aria-label="Zobrazit API klíč">Zobrazit</button>
+        </div>
+        <p class="help">API klíč získáte ve svém účtu LingQ v sekci API key.</p>
+
+        <div class="field-grid">
+          <div>
+            <label for="language">Učím se</label>
+            <select id="language">
+              <option value="en">Angličtina</option>
+              <option value="de">Němčina</option>
+              <option value="es">Španělština</option>
+              <option value="fr">Francouzština</option>
+              <option value="it">Italština</option>
+              <option value="pt">Portugalština</option>
+              <option value="ru">Ruština</option>
+              <option value="pl">Polština</option>
+              <option value="ja">Japonština</option>
+              <option value="ko">Korejština</option>
+              <option value="zh">Čínština</option>
+            </select>
+          </div>
+          <div>
+            <label for="target-language">Překládat do</label>
+            <select id="target-language">
+              <option value="cs">Čeština</option>
+              <option value="en">Angličtina</option>
+              <option value="de">Němčina</option>
+              <option value="es">Španělština</option>
+              <option value="fr">Francouzština</option>
+              <option value="sk">Slovenština</option>
+              <option value="pl">Polština</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="click-count">Bublina vyskočí po</label>
+        <select id="click-count">
+          <option value="1">jednom kliknutí</option>
+          <option value="2">dvou kliknutích</option>
+        </select>
+        <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
+
+        <button class="save-button" type="submit">Uložit nastavení</button>
+        <p class="form-message" id="form-message" role="status"></p>
+      </form>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
