@@ -65,3 +65,4 @@ Experiment (větev experiment)
 5. 11. 2026
 - V tabulce words: created_at (vložení) a updated_at (poslední editace překladu/úrovně, ne pouhé zobrazení).
 - Ve slovníku se u slovíčka zobrazí časy vložení a úpravy.
+- Velikost popup okna lze táhnout za pravý dolní roh; zvolená velikost se pamatuje.

@@ -8,6 +8,18 @@ const DEFAULTS = {
   supabaseKey: 'sb_publishable_xt7bWa2O1LYbohcB4x77ig_E8AXesvc',
 };
 
+const POPUP_SIZE_DEFAULTS = {
+  popupWidth: 645,
+  popupHeight: 620,
+};
+
+const POPUP_SIZE_LIMITS = {
+  minWidth: 360,
+  maxWidth: 800,
+  minHeight: 420,
+  maxHeight: 600,
+};
+
 const form = document.getElementById('settings-form');
 const apiKeyInput = document.getElementById('api-key');
 const languageInput = document.getElementById('language');
@@ -29,10 +41,16 @@ const wordSearchInput = document.getElementById('word-search');
 const wordSortInput = document.getElementById('word-sort');
 const wordsMeta = document.getElementById('words-meta');
 const wordsList = document.getElementById('words-list');
+const resizeHandle = document.getElementById('resize-handle');
 
 let allWords = [];
 let wordsLoaded = false;
 let wordsLoading = false;
+let currentPopupWidth = POPUP_SIZE_DEFAULTS.popupWidth;
+let currentPopupHeight = POPUP_SIZE_DEFAULTS.popupHeight;
+
+restorePopupSize();
+setupPopupResize();
 
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   apiKeyInput.value = settings.apiKey;
@@ -271,4 +289,71 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function restorePopupSize() {
+  chrome.storage.local.get(POPUP_SIZE_DEFAULTS, (stored) => {
+    applyPopupSize(stored.popupWidth, stored.popupHeight, false);
+  });
+}
+
+function setupPopupResize() {
+  if (!resizeHandle) {
+    return;
+  }
+
+  let startX = 0;
+  let startY = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+
+  const onPointerMove = (event) => {
+    const nextWidth = startWidth + (event.clientX - startX);
+    const nextHeight = startHeight + (event.clientY - startY);
+    applyPopupSize(nextWidth, nextHeight, false);
+  };
+
+  const onPointerUp = (event) => {
+    resizeHandle.releasePointerCapture?.(event.pointerId);
+    document.body.classList.remove('is-resizing');
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerUp);
+    applyPopupSize(currentPopupWidth, currentPopupHeight, true);
+  };
+
+  resizeHandle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    startX = event.clientX;
+    startY = event.clientY;
+    startWidth = currentPopupWidth;
+    startHeight = currentPopupHeight;
+    document.body.classList.add('is-resizing');
+    resizeHandle.setPointerCapture?.(event.pointerId);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  });
+}
+
+function applyPopupSize(width, height, persist) {
+  currentPopupWidth = clampNumber(width, POPUP_SIZE_LIMITS.minWidth, POPUP_SIZE_LIMITS.maxWidth);
+  currentPopupHeight = clampNumber(height, POPUP_SIZE_LIMITS.minHeight, POPUP_SIZE_LIMITS.maxHeight);
+  document.documentElement.style.setProperty('--popup-width', `${currentPopupWidth}px`);
+  document.documentElement.style.setProperty('--popup-height', `${currentPopupHeight}px`);
+
+  if (persist) {
+    chrome.storage.local.set({
+      popupWidth: currentPopupWidth,
+      popupHeight: currentPopupHeight,
+    });
+  }
+}
+
+function clampNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.round(number)));
 }
