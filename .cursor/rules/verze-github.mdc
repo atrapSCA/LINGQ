@@ -1,26 +1,30 @@
 ---
-description: Verzování doplňku přes Git a GitHub (commity, tagy, push)
+description: Stabilní main vs. experimentální větev, verzování přes GitHub
 alwaysApply: true
 ---
 
-# Verze a GitHub
+# Větve a verze
 
-Po každé hotové úpravě vytvoř novou verzi a ulož ji na GitHub.
+## Stabilní vs. experiment
 
-## Číslování
+- `main` + tag `v0.1.08` = **stabilní** finální doplněk. Neměň ho přímo novými nápady.
+- `experiment` = větev pro rozšíření, která se možná nevyužijí. Tady probíhá nová práce.
+- Když experiment funguje a má zůstat: sloučit `experiment` → `main`, zvýšit verzi, tag, push.
+- Když experiment neuspěje: nechat větev být / smazat; `main` zůstane beze změny.
 
-- Formát: `0.1.XX` (poslední číslo +1), např. `0.1.08` → `0.1.09`
-- Změň `"version"` v `manifest.json`
-- Doplň do `ZMENY.txt` blok: `Verze X.Y.ZZ`, datum/čas, odrážky změn
+## Práce na rozšíření
 
-## Uložení verze
+- Pracuj na větvi `experiment` (ne na `main`).
+- Commity a push na `origin/experiment` průběžně.
+- Oficiální číslo verze a tag `vX.Y.ZZ` až při sloučení do `main` (ne při každém pokusu na experimentu).
+- Dočasně může `manifest.json` na experimentu mít např. `0.1.08-exp` — po merge na `main` dej čisté `0.1.09` (nebo další).
 
-1. Spusť `powershell -File uloz-verzi.ps1` (commit + tag `vX.Y.ZZ` + push), nebo stejné kroky ručně přes git
-2. Nepřidávej nové snímky do složky `verze/` — historické složky nech být, nové verze jen GitHub
-3. Commit message: krátký popis změn (proč), tag: `v` + číslo z manifestu (např. `v0.1.09`)
-4. Po uložení vždy `git push` a `git push --tags` na `origin`
+## Uložení oficiální verze (jen na main po merge)
 
-## Obnova
+1. Zvyš `"version"` v `manifest.json`, doplň `ZMENY.txt`
+2. `powershell -File uloz-verzi.ps1` (commit + tag + push)
+3. Nepřidávej nové snímky do `verze/`
 
-- `git checkout v0.1.08` (nebo `powershell -File obnov-verzi.ps1 -Verze 0.1.08`)
-- Starší snímky ve `verze/` slouží jen jako záloha před přechodem na GitHub
+## Obnova stabilní verze
+
+- `git checkout main` nebo `powershell -File obnov-verzi.ps1 -Verze 0.1.08`
