@@ -395,28 +395,66 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
   }
 
   const weekCount = cells.length / 7;
+  const weekMeta = [];
+  for (let week = 0; week < weekCount; week += 1) {
+    const weekDays = [];
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const day = cells[week * 7 + weekday];
+      if (day) {
+        weekDays.push(day);
+      }
+    }
+    const monthKey = weekDays.length
+      ? (() => {
+        const date = new Date(`${weekDays[0]}T12:00:00`);
+        return `${date.getFullYear()}-${date.getMonth()}`;
+      })()
+      : '';
+    const prevMonthKey = week > 0 ? weekMeta[week - 1].monthKey : '';
+    const startsMonth = Boolean(monthKey) && (week === 0 || monthKey !== prevMonthKey
+      || weekDays.some((day) => new Date(`${day}T12:00:00`).getDate() === 1));
+    weekMeta.push({ weekDays, monthKey, startsMonth });
+  }
+  for (let week = 0; week < weekCount; week += 1) {
+    const next = weekMeta[week + 1];
+    weekMeta[week].endsMonth = Boolean(weekMeta[week].monthKey)
+      && (!next || next.startsMonth || next.monthKey !== weekMeta[week].monthKey);
+  }
+
   const heatmapWrap = statsHeatmap.closest('.heatmap-wrap');
   if (heatmapWrap) {
     heatmapWrap.style.setProperty('--heatmap-weeks', String(weekCount));
   }
-  statsHeatmap.style.setProperty('--heatmap-weeks', String(weekCount));
 
-  // Buňky jdou po sloupcích (týdnech): Po..Ne dolů, další týden vpravo.
   for (let week = 0; week < weekCount; week += 1) {
+    const column = document.createElement('div');
+    column.className = 'heatmap-week';
+    if (weekMeta[week].startsMonth) {
+      column.classList.add('heatmap-week--month-start');
+    }
+    if (weekMeta[week].endsMonth) {
+      column.classList.add('heatmap-week--month-end');
+    }
+
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const day = cells[week * 7 + weekday];
       const cell = document.createElement(day ? 'button' : 'span');
       if (day) {
         const count = daysMap.get(day) || 0;
+        const date = new Date(`${day}T12:00:00`);
         cell.type = 'button';
         cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
-        cell.title = `${formatShortDate(new Date(`${day}T12:00:00`))}: ${count}×`;
+        if (date.getDate() === 1) {
+          cell.classList.add('heat--month-first');
+        }
+        cell.title = `${formatShortDate(date)}: ${count}×`;
         cell.setAttribute('aria-label', cell.title);
       } else {
         cell.className = 'heat heat-empty';
       }
-      statsHeatmap.appendChild(cell);
+      column.appendChild(cell);
     }
+    statsHeatmap.appendChild(column);
   }
 
   if (!statsHeatmapMonths) {
@@ -427,14 +465,13 @@ function renderTinyHeatmap(dayList, daysMap, maxClicks) {
   for (let week = 0; week < weekCount; week += 1) {
     const label = document.createElement('span');
     label.className = 'heatmap-month';
-    const weekDays = [];
-    for (let weekday = 0; weekday < 7; weekday += 1) {
-      const day = cells[week * 7 + weekday];
-      if (day) {
-        weekDays.push(day);
-      }
+    if (weekMeta[week].startsMonth) {
+      label.classList.add('heatmap-month--start');
     }
-    const anchor = weekDays[0];
+    if (weekMeta[week].endsMonth) {
+      label.classList.add('heatmap-month--end');
+    }
+    const anchor = weekMeta[week].weekDays[0];
     if (anchor) {
       const date = new Date(`${anchor}T12:00:00`);
       const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
