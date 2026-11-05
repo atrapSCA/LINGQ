@@ -133,7 +133,7 @@ async function lookupWord(word) {
     }, cleanWord, settings);
   }
 
-  queueSupabaseTouch(result, settings);
+  result.viewCount = await attachSupabaseViewCount(result, settings);
   return result;
 }
 
@@ -623,18 +623,24 @@ function getErrorMessage(error) {
   return error instanceof Error ? error.message : 'Nepodařilo se spojit s LingQ.';
 }
 
-function queueSupabaseTouch(result, settings) {
+async function attachSupabaseViewCount(result, settings) {
   if (!result?.word) {
-    return;
+    return null;
   }
-  syncSupabaseWord('touch_word', {
-    word: result.word,
-    translation: result.translation,
-    status: result.status,
-    cardId: result.cardId,
-  }, settings).catch(() => {
+  try {
+    const row = await syncSupabaseWord('touch_word', {
+      word: result.word,
+      translation: result.translation,
+      status: result.status,
+      cardId: result.cardId,
+    }, settings);
+    const viewCount = Number(row?.view_count);
+    // Nový záznam začíná na 1 — v bublině ukazujeme počet jen u už dříve viděných slov.
+    return Number.isInteger(viewCount) && viewCount > 1 ? viewCount : null;
+  } catch {
     // LingQ bublina zůstane, i když sync do Supabase selže.
-  });
+    return null;
+  }
 }
 
 function queueSupabaseUpdate(fields, settings) {

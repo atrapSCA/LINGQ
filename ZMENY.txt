@@ -53,3 +53,4 @@ Experiment (větev experiment, zatím bez oficiálního tagu)
 - Nové slovo se vloží, existující zvýší view_count.
 - Změna překladu nebo stupně znalosti se propsíše i do Supabase.
 - LingQ napojení beze změny; v popup lze upravit Supabase URL a publishable klíč.
+- V bublině se u dříve viděných slov zobrazí „Viděno N×“ ze Supabase; u prvního záznamu se počet nevypisuje.

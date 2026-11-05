@@ -127,7 +127,16 @@ function lookupFromPoint(clientX, clientY, target, event) {
       return;
     }
     const kind = response.unknown ? 'unknown' : 'known';
-    showTooltip(selection.word, selection.rect, response.translation, kind, response.status, response.cardId, response.translations || [response.translation]);
+    showTooltip(
+      selection.word,
+      selection.rect,
+      response.translation,
+      kind,
+      response.status,
+      response.cardId,
+      response.translations || [response.translation],
+      response.viewCount || null,
+    );
   });
 }
 
@@ -253,7 +262,7 @@ function isWordCharacter(character) {
   return /[\p{L}\p{M}\p{N}'’\-]/u.test(character);
 }
 
-function showTooltip(word, rect, translation, kind, status, cardId, translations) {
+function showTooltip(word, rect, translation, kind, status, cardId, translations, viewCount = null) {
   if (!tooltip) {
     tooltip = document.createElement('div');
     tooltip.id = TOOLTIP_ID;
@@ -265,10 +274,16 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
   tooltip.dataset.word = word;
   tooltip.dataset.translation = kind === 'loading' || kind === 'error' ? '' : translation;
   tooltip.dataset.cardId = cardId ? String(cardId) : '';
-  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button">Další překlady</button><div class="lingq-tooltip__alternative-list" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
+  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button">Další překlady</button><div class="lingq-tooltip__alternative-list" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
   tooltip.querySelector('.lingq-tooltip__word').textContent = word;
   const translationElement = tooltip.querySelector('.lingq-tooltip__translation');
   translationElement.textContent = translation;
+  const viewsElement = tooltip.querySelector('.lingq-tooltip__views');
+  const seenCount = Number(viewCount);
+  if (Number.isInteger(seenCount) && seenCount > 1 && kind !== 'loading' && kind !== 'error') {
+    viewsElement.hidden = false;
+    viewsElement.textContent = `Viděno ${seenCount}×`;
+  }
   if (cardId && kind !== 'loading' && kind !== 'error') {
     enableTranslationEditing(translationElement);
   }
