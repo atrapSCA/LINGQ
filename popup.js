@@ -45,8 +45,8 @@ const wordsList = document.getElementById('words-list');
 const statsPeriodInput = document.getElementById('stats-period');
 const statsMeta = document.getElementById('stats-meta');
 const statsHeatmap = document.getElementById('stats-heatmap');
-const statsHeatmapMonths = document.getElementById('stats-heatmap-months');
 const statsTableBody = document.querySelector('#stats-table tbody');
+const WEEKDAY_LABELS = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
 const resizeHandle = document.getElementById('resize-handle');
 
 let allWords = [];
@@ -351,7 +351,7 @@ function renderStats(stats) {
     .sort((a, b) => b.clicks - a.clicks)[0];
 
   statsMeta.textContent = `${formatShortDate(rangeStart)} – ${formatShortDate(rangeEnd)} · ${clicks} kliknutí`;
-  renderTinyHeatmap(dayList, daysMap, maxClicks);
+  renderMonthCalendars(rangeStart, rangeEnd, daysMap, maxClicks);
 
   const rows = [
     ['Kliknutí ve zvoleném období', String(clicks)],
@@ -381,108 +381,91 @@ function renderStats(stats) {
   });
 }
 
-function renderTinyHeatmap(dayList, daysMap, maxClicks) {
+function renderMonthCalendars(rangeStart, rangeEnd, daysMap, maxClicks) {
   statsHeatmap.innerHTML = '';
-  if (statsHeatmapMonths) {
-    statsHeatmapMonths.innerHTML = '';
-  }
-  if (!dayList.length) {
+  if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
     return;
   }
 
-  const firstOffset = weekdayIndex(dayList[0]);
-  const cells = [];
-  for (let i = 0; i < firstOffset; i += 1) {
-    cells.push(null);
-  }
-  dayList.forEach((day) => cells.push(day));
-  while (cells.length % 7 !== 0) {
-    cells.push(null);
-  }
+  const rangeStartKey = toDateKey(rangeStart);
+  const rangeEndKey = toDateKey(rangeEnd);
+  const months = listMonthsInRange(rangeStart, rangeEnd);
 
-  const weekCount = cells.length / 7;
-  const weeks = [];
-  for (let week = 0; week < weekCount; week += 1) {
-    const days = [];
-    for (let weekday = 0; weekday < 7; weekday += 1) {
-      days.push(cells[week * 7 + weekday]);
-    }
-    const realDays = days.filter(Boolean);
-    const firstOfMonth = realDays.find((day) => new Date(`${day}T12:00:00`).getDate() === 1) || null;
-    const anchor = firstOfMonth || realDays[0] || null;
-    const monthKey = anchor ? monthKeyFromDay(anchor) : `pad-${week}`;
-    weeks.push({ days, realDays, firstOfMonth, anchor, monthKey });
-  }
+  months.forEach(({ year, month }) => {
+    const card = document.createElement('section');
+    card.className = 'month-card';
 
-  const groups = [];
-  weeks.forEach((week) => {
-    const last = groups[groups.length - 1];
-    if (last && last.monthKey === week.monthKey) {
-      last.weeks.push(week);
-    } else {
-      groups.push({
-        monthKey: week.monthKey,
-        anchor: week.anchor,
-        weeks: [week],
-      });
-    }
-  });
+    const title = document.createElement('h3');
+    title.className = 'month-card__title';
+    title.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'long' }).format(new Date(year, month, 1));
+    card.appendChild(title);
 
-  groups.forEach((group) => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'heatmap-month-group';
-    if (group.anchor) {
-      const date = new Date(`${group.anchor}T12:00:00`);
-      const monthName = new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(date);
-      groupEl.title = monthName;
-    }
-
-    group.weeks.forEach((week) => {
-      const column = document.createElement('div');
-      column.className = 'heatmap-week';
-      week.days.forEach((day) => {
-        const cell = document.createElement(day ? 'button' : 'span');
-        if (day) {
-          const count = Number(daysMap.get(day)) || 0;
-          const date = new Date(`${day}T12:00:00`);
-          cell.type = 'button';
-          cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
-          if (date.getDate() === 1) {
-            cell.classList.add('heat--month-start-day');
-          }
-          cell.title = `${formatShortDate(date)}: ${count}×`;
-          cell.setAttribute('aria-label', cell.title);
-        } else {
-          cell.className = 'heat heat-pad';
-        }
-        column.appendChild(cell);
-      });
-      groupEl.appendChild(column);
+    const weekdays = document.createElement('div');
+    weekdays.className = 'month-card__weekdays';
+    WEEKDAY_LABELS.forEach((label, index) => {
+      const mark = document.createElement('span');
+      mark.textContent = label;
+      if (index === 6) {
+        mark.classList.add('is-sunday');
+      }
+      weekdays.appendChild(mark);
     });
+    card.appendChild(weekdays);
 
-    statsHeatmap.appendChild(groupEl);
-  });
+    const grid = document.createElement('div');
+    grid.className = 'month-card__grid';
 
-  if (!statsHeatmapMonths) {
-    return;
-  }
+    const firstDay = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const startPad = (firstDay.getDay() + 6) % 7;
 
-  groups.forEach((group) => {
-    const label = document.createElement('div');
-    label.className = 'heatmap-month';
-    label.style.flex = `0 0 ${group.weeks.length * 12 - 2}px`;
-    if (group.anchor && !String(group.monthKey).startsWith('pad-')) {
-      const date = new Date(`${group.anchor}T12:00:00`);
-      label.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'short' }).format(date);
-      label.title = new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(date);
+    for (let i = 0; i < startPad; i += 1) {
+      const pad = document.createElement('span');
+      pad.className = 'heat heat-pad';
+      grid.appendChild(pad);
     }
-    statsHeatmapMonths.appendChild(label);
+
+    for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber += 1) {
+      const date = new Date(year, month, dayNumber);
+      const key = toDateKey(date);
+      const inRange = key >= rangeStartKey && key <= rangeEndKey;
+      const count = inRange ? (Number(daysMap.get(key)) || 0) : 0;
+      const cell = document.createElement(inRange ? 'button' : 'span');
+
+      if (inRange) {
+        cell.type = 'button';
+        cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
+        cell.title = `${formatShortDate(date)}: ${count}×`;
+        cell.setAttribute('aria-label', cell.title);
+      } else {
+        cell.className = 'heat heat-out';
+        cell.title = `${formatShortDate(date)} (mimo období)`;
+      }
+
+      if (date.getDay() === 0) {
+        cell.classList.add('is-sunday');
+      }
+
+      grid.appendChild(cell);
+    }
+
+    card.appendChild(grid);
+    statsHeatmap.appendChild(card);
   });
 }
 
-function monthKeyFromDay(day) {
-  const date = new Date(`${day}T12:00:00`);
-  return `${date.getFullYear()}-${date.getMonth()}`;
+function listMonthsInRange(start, end) {
+  const months = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const last = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (cursor <= last) {
+    months.push({
+      year: cursor.getFullYear(),
+      month: cursor.getMonth(),
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months;
 }
 
 function buildDayList(start, end) {
