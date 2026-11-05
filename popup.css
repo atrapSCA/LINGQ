@@ -84,7 +84,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
   overflow: hidden;
 }
 
-.tab-panel[hidden] { display: none; }
+.tab-panel[hidden],
+#panel-stats[hidden],
+#panel-words[hidden],
+#panel-settings[hidden] {
+  display: none !important;
+}
 
 form {
   flex: 1 1 auto;
