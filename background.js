@@ -83,6 +83,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_USAGE_STATS') {
+    getUsageStats(message.period)
+      .then((stats) => sendResponse({ ok: true, stats }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Statistiky se nepodařilo načíst.' }));
+    return true;
+  }
+
   return false;
 });
 
@@ -684,6 +691,68 @@ async function listSupabaseWords() {
 
   const rows = await response.json();
   return Array.isArray(rows) ? rows : [];
+}
+
+function getStatsPeriodRange(period) {
+  const now = new Date();
+  const end = now;
+  const start = new Date(now);
+
+  if (period === 'month') {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+  } else if (period === 'quarter') {
+    start.setMonth(start.getMonth() - 3);
+    start.setHours(0, 0, 0, 0);
+  } else if (period === 'half') {
+    start.setMonth(start.getMonth() - 6);
+    start.setHours(0, 0, 0, 0);
+  } else if (period === 'year') {
+    start.setFullYear(start.getFullYear() - 1);
+    start.setHours(0, 0, 0, 0);
+  } else {
+    start.setDate(start.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+  }
+
+  return { from: start.toISOString(), to: end.toISOString(), start, end };
+}
+
+async function getUsageStats(period = '30d') {
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+  }
+
+  const range = getStatsPeriodRange(period);
+  const response = await fetch(`${baseUrl}/rest/v1/rpc/get_usage_stats`, {
+    method: 'POST',
+    headers: {
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_language: settings.language || 'en',
+      p_from: range.from,
+      p_to: range.to,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+  }
+
+  const stats = await response.json();
+  return {
+    ...stats,
+    period,
+    rangeStart: range.from,
+    rangeEnd: range.to,
+  };
 }
 
 async function syncSupabaseWord(rpcName, fields, settings) {

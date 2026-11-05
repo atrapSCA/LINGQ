@@ -67,3 +67,9 @@ Verze 0.1.11
 - Ve slovníku se u slovíčka zobrazí časy vložení a úpravy.
 - Popup je větší a čas vložení je vizuálně oddělený od překladu.
 - Velikost popup okna lze táhnout za pravý dolní roh; zvolená velikost se pamatuje.
+
+Experiment (větev experiment)
+5. 11. 2026
+- Nová záložka Statistiky: heatmap kalendář kliknutí a tabulka za období.
+- Období: 30 dní, tento měsíc, 1/4 roku, půl roku, rok.
+- Logování kliknutí do usage_events; přidáno/upraveno a úrovně 1–K ze slovníku.

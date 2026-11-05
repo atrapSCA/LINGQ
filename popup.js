@@ -37,15 +37,21 @@ const statusDot = document.getElementById('status-dot');
 const tabButtons = [...document.querySelectorAll('.tab')];
 const panelSettings = document.getElementById('panel-settings');
 const panelWords = document.getElementById('panel-words');
+const panelStats = document.getElementById('panel-stats');
 const wordSearchInput = document.getElementById('word-search');
 const wordSortInput = document.getElementById('word-sort');
 const wordsMeta = document.getElementById('words-meta');
 const wordsList = document.getElementById('words-list');
+const statsPeriodInput = document.getElementById('stats-period');
+const statsMeta = document.getElementById('stats-meta');
+const statsHeatmap = document.getElementById('stats-heatmap');
+const statsTableBody = document.querySelector('#stats-table tbody');
 const resizeHandle = document.getElementById('resize-handle');
 
 let allWords = [];
 let wordsLoaded = false;
 let wordsLoading = false;
+let statsLoading = false;
 let currentPopupWidth = POPUP_SIZE_DEFAULTS.popupWidth;
 let currentPopupHeight = POPUP_SIZE_DEFAULTS.popupHeight;
 
@@ -86,6 +92,10 @@ form.addEventListener('submit', (event) => {
   });
 });
 
+statsPeriodInput.addEventListener('change', () => {
+  loadStats(true);
+});
+
 enabledInput.addEventListener('change', () => {
   const enabled = enabledInput.checked;
   chrome.storage.sync.set({ enabled });
@@ -113,16 +123,19 @@ wordSortInput.addEventListener('change', () => {
 });
 
 function activateTab(tabName) {
-  const showWords = tabName === 'words';
   tabButtons.forEach((button) => {
     const active = button.dataset.tab === tabName;
     button.classList.toggle('tab--active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  panelSettings.hidden = showWords;
-  panelWords.hidden = !showWords;
-  if (showWords) {
+  panelSettings.hidden = tabName !== 'settings';
+  panelWords.hidden = tabName !== 'words';
+  panelStats.hidden = tabName !== 'stats';
+  if (tabName === 'words') {
     loadWords(false);
+  }
+  if (tabName === 'stats') {
+    loadStats(false);
   }
 }
 
@@ -288,6 +301,152 @@ function formatDateTime(value) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  }).format(date);
+}
+
+function loadStats(force) {
+  if (statsLoading) {
+    return;
+  }
+  if (!force && statsHeatmap.dataset.loaded === statsPeriodInput.value) {
+    return;
+  }
+
+  statsLoading = true;
+  statsMeta.textContent = 'Načítám statistiky…';
+  statsHeatmap.innerHTML = '';
+  statsTableBody.innerHTML = '';
+
+  chrome.runtime.sendMessage({ type: 'GET_USAGE_STATS', period: statsPeriodInput.value }, (response) => {
+    statsLoading = false;
+    if (chrome.runtime.lastError || !response?.ok) {
+      statsHeatmap.dataset.loaded = '';
+      statsMeta.textContent = '';
+      statsHeatmap.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || 'Statistiky se nepodařilo načíst.'}</div>`;
+      return;
+    }
+    statsHeatmap.dataset.loaded = statsPeriodInput.value;
+    renderStats(response.stats || {});
+  });
+}
+
+function renderStats(stats) {
+  const daysMap = new Map((stats.days || []).map((item) => [String(item.day).slice(0, 10), Number(item.clicks) || 0]));
+  const rangeStart = new Date(stats.rangeStart || stats.from);
+  const rangeEnd = new Date(stats.rangeEnd || stats.to);
+  const dayList = buildDayList(rangeStart, rangeEnd);
+  const maxClicks = Math.max(0, ...dayList.map((day) => daysMap.get(day) || 0));
+  const clicks = Number(stats.clicks) || 0;
+  const activeDays = Number(stats.active_days) || 0;
+  const avg = activeDays > 0 ? (clicks / activeDays) : 0;
+  const top = dayList
+    .map((day) => ({ day, clicks: daysMap.get(day) || 0 }))
+    .sort((a, b) => b.clicks - a.clicks)[0];
+
+  statsMeta.textContent = `${formatShortDate(rangeStart)} – ${formatShortDate(rangeEnd)} · ${clicks} kliknutí`;
+
+  statsHeatmap.innerHTML = '';
+  const weekdays = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+  weekdays.forEach((label) => {
+    const mark = document.createElement('span');
+    mark.className = 'heatmap-weekday';
+    mark.textContent = label;
+    statsHeatmap.appendChild(mark);
+  });
+
+  const firstWeekday = (dayList.length ? weekdayIndex(dayList[0]) : 0);
+  for (let i = 0; i < firstWeekday; i += 1) {
+    const spacer = document.createElement('span');
+    spacer.className = 'heat heat-empty';
+    statsHeatmap.appendChild(spacer);
+  }
+
+  dayList.forEach((day) => {
+    const count = daysMap.get(day) || 0;
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
+    cell.title = `${formatShortDate(new Date(`${day}T12:00:00`))}: ${count}×`;
+    cell.setAttribute('aria-label', cell.title);
+    statsHeatmap.appendChild(cell);
+  });
+
+  const rows = [
+    ['Kliknutí ve zvoleném období', String(clicks)],
+    ['Aktivní dny', String(activeDays)],
+    ['Průměr kliknutí / aktivní den', avg ? avg.toFixed(1).replace('.', ',') : '0'],
+    ['Nejaktivnější den', top && top.clicks ? `${formatShortDate(new Date(`${top.day}T12:00:00`))} (${top.clicks}×)` : '—'],
+    ['Přidáno slovíček', String(Number(stats.added) || 0)],
+    ['Upraveno slovíček', String(Number(stats.edited) || 0)],
+    ['Celkem slovíček ve slovníku', String(Number(stats.total_words) || 0)],
+    ['Znalost 1', String(Number(stats.status_1) || 0)],
+    ['Znalost 2', String(Number(stats.status_2) || 0)],
+    ['Znalost 3', String(Number(stats.status_3) || 0)],
+    ['Znalost 4', String(Number(stats.status_4) || 0)],
+    ['Znalost K', String(Number(stats.status_5) || 0)],
+  ];
+
+  statsTableBody.innerHTML = '';
+  rows.forEach(([label, value]) => {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.scope = 'row';
+    th.textContent = label;
+    const td = document.createElement('td');
+    td.textContent = value;
+    tr.append(th, td);
+    statsTableBody.appendChild(tr);
+  });
+}
+
+function buildDayList(start, end) {
+  const days = [];
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return days;
+  }
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (cursor <= last) {
+    days.push(toDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function weekdayIndex(dayKey) {
+  const date = new Date(`${dayKey}T12:00:00`);
+  return (date.getDay() + 6) % 7;
+}
+
+function heatLevel(count, maxClicks) {
+  if (!count) {
+    return 0;
+  }
+  if (!maxClicks || maxClicks <= 1) {
+    return 1;
+  }
+  const ratio = count / maxClicks;
+  if (ratio <= 0.25) return 1;
+  if (ratio <= 0.5) return 2;
+  if (ratio <= 0.75) return 3;
+  return 4;
+}
+
+function formatShortDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat('cs-CZ', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
   }).format(date);
 }
 

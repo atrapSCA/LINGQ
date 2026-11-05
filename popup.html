@@ -30,6 +30,7 @@
 
       <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
         <button class="tab tab--active" type="button" role="tab" id="tab-words" aria-selected="true" aria-controls="panel-words" data-tab="words">Slovník</button>
+        <button class="tab" type="button" role="tab" id="tab-stats" aria-selected="false" aria-controls="panel-stats" data-tab="stats">Statistiky</button>
         <button class="tab" type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-tab="settings">Nastavení</button>
       </nav>
 
@@ -106,6 +107,35 @@
         </div>
         <p class="words-meta" id="words-meta">Načítám slovíčka…</p>
         <div class="words-list" id="words-list" role="list"></div>
+      </section>
+
+      <section class="tab-panel" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
+        <div class="stats-toolbar">
+          <label class="sr-only" for="stats-period">Období</label>
+          <select id="stats-period">
+            <option value="30d">Posledních 30 dní</option>
+            <option value="month">Tento měsíc</option>
+            <option value="quarter">1/4 roku</option>
+            <option value="half">Půl roku</option>
+            <option value="year">Rok</option>
+          </select>
+        </div>
+        <p class="stats-meta" id="stats-meta">Načítám statistiky…</p>
+        <div class="heatmap-wrap">
+          <div class="heatmap-legend">
+            <span>Méně</span>
+            <span class="heat heat-0" title="0"></span>
+            <span class="heat heat-1" title="málo"></span>
+            <span class="heat heat-2" title="středně"></span>
+            <span class="heat heat-3" title="hodně"></span>
+            <span class="heat heat-4" title="nejvíce"></span>
+            <span>Více</span>
+          </div>
+          <div class="heatmap" id="stats-heatmap" aria-label="Kalendář použití"></div>
+        </div>
+        <table class="stats-table" id="stats-table">
+          <tbody></tbody>
+        </table>
       </section>
     </main>
     <div class="resize-handle" id="resize-handle" title="Změnit velikost okna" aria-label="Změnit velikost okna"></div>
