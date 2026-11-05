@@ -489,11 +489,6 @@ function toDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
-function weekdayIndex(dayKey) {
-  const date = new Date(`${dayKey}T12:00:00`);
-  return (date.getDay() + 6) % 7;
-}
-
 function heatLevel(count, maxClicks) {
   if (!count) {
     return 0;
