@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Stabilní vs. experiment
 
-- `main` + nejnovější tag (`v0.1.10`) = **stabilní** finální doplněk. Neměň ho přímo novými nápady.
+- `main` + nejnovější tag (`v0.1.11`) = **stabilní** finální doplněk. Neměň ho přímo novými nápady.
 - `experiment` = větev pro rozšíření, která se možná nevyužijí. Tady probíhá nová práce.
 - Když experiment funguje a má zůstat: sloučit `experiment` → `main`, zvýšit verzi, tag, push.
 - Když experiment neuspěje: nechat větev být / smazat; `main` zůstane beze změny.
@@ -17,7 +17,7 @@ alwaysApply: true
 - Pracuj na větvi `experiment` (ne na `main`).
 - Commity a push na `origin/experiment` průběžně.
 - Oficiální číslo verze a tag `vX.Y.ZZ` až při sloučení do `main` (ne při každém pokusu na experimentu).
-- Dočasně může `manifest.json` na experimentu mít např. `0.1.10-exp` — po merge na `main` dej čisté další číslo.
+- Dočasně může `manifest.json` na experimentu mít např. `0.1.11-exp` — po merge na `main` dej čisté další číslo.
 
 ## Uložení oficiální verze (jen na main po merge)
 
@@ -27,4 +27,4 @@ alwaysApply: true
 
 ## Obnova stabilní verze
 
-- `git checkout main` nebo `powershell -File obnov-verzi.ps1 -Verze 0.1.10`
+- `git checkout main` nebo `powershell -File obnov-verzi.ps1 -Verze 0.1.11`
