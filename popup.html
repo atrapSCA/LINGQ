@@ -122,6 +122,13 @@
         </div>
         <p class="stats-meta" id="stats-meta">Načítám statistiky…</p>
         <div class="heatmap-wrap">
+          <div class="heatmap-months" id="stats-heatmap-months" aria-hidden="true"></div>
+          <div class="heatmap-body">
+            <div class="heatmap-weekdays" aria-hidden="true">
+              <span>Po</span><span></span><span>St</span><span></span><span>Pá</span><span></span><span></span>
+            </div>
+            <div class="heatmap" id="stats-heatmap" aria-label="Kalendář použití"></div>
+          </div>
           <div class="heatmap-legend">
             <span>Méně</span>
             <span class="heat heat-0" title="0"></span>
@@ -131,7 +138,6 @@
             <span class="heat heat-4" title="nejvíce"></span>
             <span>Více</span>
           </div>
-          <div class="heatmap" id="stats-heatmap" aria-label="Kalendář použití"></div>
         </div>
         <table class="stats-table" id="stats-table">
           <tbody></tbody>

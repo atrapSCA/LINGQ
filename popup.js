@@ -45,6 +45,7 @@ const wordsList = document.getElementById('words-list');
 const statsPeriodInput = document.getElementById('stats-period');
 const statsMeta = document.getElementById('stats-meta');
 const statsHeatmap = document.getElementById('stats-heatmap');
+const statsHeatmapMonths = document.getElementById('stats-heatmap-months');
 const statsTableBody = document.querySelector('#stats-table tbody');
 const resizeHandle = document.getElementById('resize-handle');
 
@@ -344,32 +345,7 @@ function renderStats(stats) {
     .sort((a, b) => b.clicks - a.clicks)[0];
 
   statsMeta.textContent = `${formatShortDate(rangeStart)} – ${formatShortDate(rangeEnd)} · ${clicks} kliknutí`;
-
-  statsHeatmap.innerHTML = '';
-  const weekdays = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
-  weekdays.forEach((label) => {
-    const mark = document.createElement('span');
-    mark.className = 'heatmap-weekday';
-    mark.textContent = label;
-    statsHeatmap.appendChild(mark);
-  });
-
-  const firstWeekday = (dayList.length ? weekdayIndex(dayList[0]) : 0);
-  for (let i = 0; i < firstWeekday; i += 1) {
-    const spacer = document.createElement('span');
-    spacer.className = 'heat heat-empty';
-    statsHeatmap.appendChild(spacer);
-  }
-
-  dayList.forEach((day) => {
-    const count = daysMap.get(day) || 0;
-    const cell = document.createElement('button');
-    cell.type = 'button';
-    cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
-    cell.title = `${formatShortDate(new Date(`${day}T12:00:00`))}: ${count}×`;
-    cell.setAttribute('aria-label', cell.title);
-    statsHeatmap.appendChild(cell);
-  });
+  renderTinyHeatmap(dayList, daysMap, maxClicks);
 
   const rows = [
     ['Kliknutí ve zvoleném období', String(clicks)],
@@ -397,6 +373,80 @@ function renderStats(stats) {
     tr.append(th, td);
     statsTableBody.appendChild(tr);
   });
+}
+
+function renderTinyHeatmap(dayList, daysMap, maxClicks) {
+  statsHeatmap.innerHTML = '';
+  if (statsHeatmapMonths) {
+    statsHeatmapMonths.innerHTML = '';
+  }
+  if (!dayList.length) {
+    return;
+  }
+
+  const firstOffset = weekdayIndex(dayList[0]);
+  const cells = [];
+  for (let i = 0; i < firstOffset; i += 1) {
+    cells.push(null);
+  }
+  dayList.forEach((day) => cells.push(day));
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  const weekCount = cells.length / 7;
+  const heatmapWrap = statsHeatmap.closest('.heatmap-wrap');
+  if (heatmapWrap) {
+    heatmapWrap.style.setProperty('--heatmap-weeks', String(weekCount));
+  }
+  statsHeatmap.style.setProperty('--heatmap-weeks', String(weekCount));
+
+  for (let week = 0; week < weekCount; week += 1) {
+    const column = document.createElement('div');
+    column.className = 'heatmap-week';
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const day = cells[week * 7 + weekday];
+      const cell = document.createElement(day ? 'button' : 'span');
+      if (day) {
+        const count = daysMap.get(day) || 0;
+        cell.type = 'button';
+        cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
+        cell.title = `${formatShortDate(new Date(`${day}T12:00:00`))}: ${count}×`;
+        cell.setAttribute('aria-label', cell.title);
+      } else {
+        cell.className = 'heat heat-empty';
+      }
+      column.appendChild(cell);
+    }
+    statsHeatmap.appendChild(column);
+  }
+
+  if (!statsHeatmapMonths) {
+    return;
+  }
+
+  let lastMonthKey = '';
+  for (let week = 0; week < weekCount; week += 1) {
+    const label = document.createElement('span');
+    label.className = 'heatmap-month';
+    const weekDays = [];
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const day = cells[week * 7 + weekday];
+      if (day) {
+        weekDays.push(day);
+      }
+    }
+    const anchor = weekDays[0];
+    if (anchor) {
+      const date = new Date(`${anchor}T12:00:00`);
+      const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+      if (monthKey !== lastMonthKey) {
+        label.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'short' }).format(date);
+        lastMonthKey = monthKey;
+      }
+    }
+    statsHeatmapMonths.appendChild(label);
+  }
 }
 
 function buildDayList(start, end) {
