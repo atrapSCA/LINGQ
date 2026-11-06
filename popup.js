@@ -11,8 +11,8 @@ const DEFAULTS = {
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
-  supabaseUrl: 'https://vsvgxetuilgwhrqnyipd.supabase.co',
-  supabaseKey: 'sb_publishable_xt7bWa2O1LYbohcB4x77ig_E8AXesvc',
+  supabaseUrl: '',
+  supabaseKey: '',
 };
 
 const CHATGPT_MODEL_IDS = [
@@ -58,6 +58,10 @@ const latencyIdleMaxInput = document.getElementById('latency-idle-max');
 const clickHelp = document.getElementById('click-help');
 const toggleKeyButton = document.getElementById('toggle-key');
 const toggleChatgptKeyButton = document.getElementById('toggle-chatgpt-key');
+const toggleSupabaseKeyButton = document.getElementById('toggle-supabase-key');
+const checkSupabaseDbButton = document.getElementById('check-supabase-db');
+const installSupabaseDbButton = document.getElementById('install-supabase-db');
+const supabaseDbStatus = document.getElementById('supabase-db-status');
 const formMessage = document.getElementById('form-message');
 let chatgptApiKeyValid = false;
 let chatgptValidationRequest = 0;
@@ -70,6 +74,7 @@ const panelWords = document.getElementById('panel-words');
 const panelImport = document.getElementById('panel-import');
 const panelStats = document.getElementById('panel-stats');
 const panelLatency = document.getElementById('panel-latency');
+const panelAuthor = document.getElementById('panel-author');
 const wordSearchInput = document.getElementById('word-search');
 const wordStatusFilterInput = document.getElementById('word-status-filter');
 const wordSortInput = document.getElementById('word-sort');
@@ -103,12 +108,16 @@ let wordsLoading = false;
 let statsLoading = false;
 let latencyLoading = false;
 let latencyLoaded = false;
+let supabaseReady = false;
+let supabaseGateMessage = 'Supabase není připravená.';
 let currentPopupWidth = POPUP_SIZE_DEFAULTS.popupWidth;
 let currentPopupHeight = POPUP_SIZE_DEFAULTS.popupHeight;
 
 restorePopupSize();
 setupPopupResize();
-restoreKnownWordsSyncStatus();
+refreshSupabaseGate({ force: true }).finally(() => {
+  restoreKnownWordsSyncStatus();
+});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.knownWordsSync) {
@@ -196,6 +205,7 @@ form.addEventListener('submit', async (event) => {
     formMessage.textContent = 'Nastavení bylo uloženo.';
     wordsLoaded = false;
     latencyLoaded = false;
+    refreshSupabaseGate({ force: true });
     window.setTimeout(() => { formMessage.textContent = ''; }, 2200);
   });
 });
@@ -362,6 +372,20 @@ toggleChatgptKeyButton.addEventListener('click', () => {
   toggleChatgptKeyButton.textContent = showing ? 'Zobrazit' : 'Skrýt';
 });
 
+toggleSupabaseKeyButton.addEventListener('click', () => {
+  const showing = supabaseKeyInput.type === 'text';
+  supabaseKeyInput.type = showing ? 'password' : 'text';
+  toggleSupabaseKeyButton.textContent = showing ? 'Zobrazit' : 'Skrýt';
+});
+
+checkSupabaseDbButton.addEventListener('click', () => {
+  runSupabaseDbCheck();
+});
+
+installSupabaseDbButton.addEventListener('click', () => {
+  runSupabaseDbInstall();
+});
+
 wordSearchInput.addEventListener('input', () => {
   renderWords();
 });
@@ -385,6 +409,8 @@ function activateTab(tabName) {
   panelImport.hidden = tabName !== 'import';
   panelStats.hidden = tabName !== 'stats';
   panelLatency.hidden = tabName !== 'latency';
+  panelAuthor.hidden = tabName !== 'author';
+  applyDbGateUi();
   if (tabName === 'words') {
     loadWords(false);
   }
@@ -397,6 +423,44 @@ function activateTab(tabName) {
   if (tabName === 'latency') {
     loadLatency(false);
   }
+}
+
+function applyDbGateUi() {
+  [panelWords, panelImport, panelStats, panelLatency].forEach((panel) => {
+    if (!panel) {
+      return;
+    }
+    panel.classList.toggle('is-db-locked', !supabaseReady);
+    panel.querySelectorAll('[data-db-gate]').forEach((gate) => {
+      gate.hidden = supabaseReady;
+    });
+  });
+  if (syncKnownWordsButton) {
+    syncKnownWordsButton.disabled = !supabaseReady;
+  }
+  if (resetLingqImportButton) {
+    resetLingqImportButton.disabled = !supabaseReady;
+  }
+}
+
+function refreshSupabaseGate({ force = false } = {}) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_SUPABASE_STATUS', force }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) {
+        supabaseReady = false;
+        supabaseGateMessage = response?.error
+          || chrome.runtime.lastError?.message
+          || 'Supabase není připravená.';
+      } else {
+        supabaseReady = response.ready === true;
+        supabaseGateMessage = response.message || (supabaseReady
+          ? 'Databáze je připravená.'
+          : 'Supabase není připravená.');
+      }
+      applyDbGateUi();
+      resolve({ ready: supabaseReady, message: supabaseGateMessage });
+    });
+  });
 }
 
 function normalizeIdleRange(settings = {}) {
@@ -614,6 +678,122 @@ function setKnownWordsStatus(message, tone = '') {
   }
 }
 
+function setSupabaseDbStatus(message, tone = '') {
+  supabaseDbStatus.textContent = message || '';
+  supabaseDbStatus.classList.remove('db-install-status--ok', 'db-install-status--error', 'db-install-status--warn');
+  if (tone === 'ok') {
+    supabaseDbStatus.classList.add('db-install-status--ok');
+  } else if (tone === 'error') {
+    supabaseDbStatus.classList.add('db-install-status--error');
+  } else if (tone === 'warn') {
+    supabaseDbStatus.classList.add('db-install-status--warn');
+  }
+}
+
+function readSupabaseFormSettings() {
+  return {
+    supabaseUrl: supabaseUrlInput.value.trim().replace(/\/$/, ''),
+    supabaseKey: supabaseKeyInput.value.trim(),
+  };
+}
+
+function persistSupabaseFormSettings() {
+  const settings = readSupabaseFormSettings();
+  return new Promise((resolve) => {
+    chrome.storage.sync.set(settings, () => resolve(settings));
+  });
+}
+
+async function runSupabaseDbCheck() {
+  checkSupabaseDbButton.disabled = true;
+  installSupabaseDbButton.disabled = true;
+  setSupabaseDbStatus('Kontroluji databázi…');
+  try {
+    const settings = await persistSupabaseFormSettings();
+    chrome.runtime.sendMessage({ type: 'CHECK_SUPABASE_SCHEMA', settings }, (response) => {
+      checkSupabaseDbButton.disabled = false;
+      installSupabaseDbButton.disabled = false;
+      if (chrome.runtime.lastError || !response?.ok) {
+        setSupabaseDbStatus(
+          response?.error || chrome.runtime.lastError?.message || 'Kontrola databáze se nezdařila.',
+          'error',
+        );
+        return;
+      }
+      const tone = response.ready ? 'ok' : (response.structureOk ? 'warn' : 'error');
+      setSupabaseDbStatus(response.message, tone);
+      supabaseReady = response.ready === true;
+      supabaseGateMessage = response.message || supabaseGateMessage;
+      applyDbGateUi();
+      if (supabaseReady) {
+        wordsLoaded = false;
+        latencyLoaded = false;
+      }
+    });
+  } catch (error) {
+    checkSupabaseDbButton.disabled = false;
+    installSupabaseDbButton.disabled = false;
+    setSupabaseDbStatus(error instanceof Error ? error.message : 'Kontrola databáze se nezdařila.', 'error');
+  }
+}
+
+async function runSupabaseDbInstall() {
+  checkSupabaseDbButton.disabled = true;
+  installSupabaseDbButton.disabled = true;
+  setSupabaseDbStatus('Připravuji instalaci…');
+  try {
+    const settings = await persistSupabaseFormSettings();
+    chrome.runtime.sendMessage({ type: 'PREPARE_SUPABASE_INSTALL', settings }, async (response) => {
+      checkSupabaseDbButton.disabled = false;
+      installSupabaseDbButton.disabled = false;
+      if (chrome.runtime.lastError || !response?.ok) {
+        setSupabaseDbStatus(
+          response?.error || chrome.runtime.lastError?.message || 'Instalace se nezdařila.',
+          'error',
+        );
+        return;
+      }
+
+      if (response.ready) {
+        setSupabaseDbStatus(response.message || 'Databáze už je aktuální.', 'ok');
+        supabaseReady = true;
+        supabaseGateMessage = response.message || supabaseGateMessage;
+        applyDbGateUi();
+        wordsLoaded = false;
+        latencyLoaded = false;
+        return;
+      }
+      supabaseReady = false;
+      applyDbGateUi();
+
+      try {
+        await navigator.clipboard.writeText(response.sql || '');
+      } catch {
+        setSupabaseDbStatus(
+          'SQL se nepodařilo zkopírovat do schránky. Otevřete SQL Editor a soubory spusťte ručně ze složky supabase/.',
+          'error',
+        );
+        if (response.editorUrl) {
+          window.open(response.editorUrl, '_blank', 'noopener,noreferrer');
+        }
+        return;
+      }
+
+      if (response.editorUrl) {
+        window.open(response.editorUrl, '_blank', 'noopener,noreferrer');
+      }
+      setSupabaseDbStatus(
+        `${response.message} SQL (${response.fileCount} souborů) je ve schránce — v SQL Editoru vložte (Ctrl+V) a spusťte Run. Pak klikněte na Zkontrolovat databázi.`,
+        'warn',
+      );
+    });
+  } catch (error) {
+    checkSupabaseDbButton.disabled = false;
+    installSupabaseDbButton.disabled = false;
+    setSupabaseDbStatus(error instanceof Error ? error.message : 'Instalace se nezdařila.', 'error');
+  }
+}
+
 function formatKnownCount(value) {
   return new Intl.NumberFormat('cs-CZ').format(Number(value) || 0);
 }
@@ -730,8 +910,16 @@ function renderKnownWordsSyncProgress(progress) {
 }
 
 function restoreKnownWordsSyncStatus() {
+  if (!supabaseReady) {
+    applyDbGateUi();
+    setKnownWordsStatus(supabaseGateMessage, 'error');
+    return;
+  }
   chrome.runtime.sendMessage({ type: 'GET_KNOWN_WORDS_SYNC_STATUS', refreshTotals: false }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
+      if (response?.error) {
+        setKnownWordsStatus(response.error, 'error');
+      }
       return;
     }
     renderKnownWordsSyncProgress(response.progress);
@@ -739,6 +927,11 @@ function restoreKnownWordsSyncStatus() {
 }
 
 function startKnownWordsSync() {
+  if (!supabaseReady) {
+    setKnownWordsStatus(supabaseGateMessage, 'error');
+    applyDbGateUi();
+    return;
+  }
   syncKnownWordsButton.disabled = true;
   syncKnownWordsButton.textContent = 'Import probíhá…';
   setKnownWordsStatus('Spouštím další dávku z LingQ…');
@@ -758,6 +951,14 @@ function startKnownWordsSync() {
 }
 
 function loadWords(force) {
+  if (!supabaseReady) {
+    wordsLoaded = false;
+    allWords = [];
+    wordsMeta.textContent = '';
+    wordsList.innerHTML = '';
+    applyDbGateUi();
+    return;
+  }
   if (wordsLoading) {
     return;
   }
@@ -964,6 +1165,14 @@ function formatDateTime(value) {
 }
 
 function loadStats(force) {
+  if (!supabaseReady) {
+    statsHeatmap.dataset.loaded = '';
+    statsMeta.textContent = '';
+    statsHeatmap.innerHTML = '';
+    statsTableBody.innerHTML = '';
+    applyDbGateUi();
+    return;
+  }
   if (statsLoading) {
     return;
   }
@@ -990,6 +1199,14 @@ function loadStats(force) {
 }
 
 function loadLatency(force) {
+  if (!supabaseReady) {
+    latencyLoaded = false;
+    latencyMeta.textContent = '';
+    latencyChart.innerHTML = '';
+    latencyTableBody.innerHTML = '';
+    applyDbGateUi();
+    return;
+  }
   if (latencyLoading) {
     return;
   }

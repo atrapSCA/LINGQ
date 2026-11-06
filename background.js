@@ -11,8 +11,8 @@ const DEFAULTS = {
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
-  supabaseUrl: 'https://vsvgxetuilgwhrqnyipd.supabase.co',
-  supabaseKey: 'sb_publishable_xt7bWa2O1LYbohcB4x77ig_E8AXesvc',
+  supabaseUrl: '',
+  supabaseKey: '',
 };
 
 const CHATGPT_MODELS = {
@@ -75,6 +75,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.enabled) {
     applyActionIcon(changes.enabled.newValue);
+  }
+  if (changes.supabaseUrl || changes.supabaseKey) {
+    invalidateSupabaseReadyCache();
+    ensureLatencyWatch({ reshuffle: true });
   }
   if (changes.latencyIdleMinSeconds || changes.latencyIdleMaxSeconds || changes.enabled) {
     ensureLatencyWatch({ reshuffle: true });
@@ -183,16 +187,64 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_SUPABASE_STATUS') {
+    getSupabaseGate({ force: Boolean(message.force) })
+      .then((gate) => sendResponse({ ok: true, ...gate }))
+      .catch((error) => sendResponse({
+        ok: false,
+        ready: false,
+        configured: false,
+        error: error instanceof Error ? error.message : 'Stav databáze se nepodařilo zjistit.',
+      }));
+    return true;
+  }
+
   if (message.type === 'LIST_SUPABASE_WORDS') {
-    listSupabaseWords()
+    requireSupabaseReady()
+      .then(() => listSupabaseWords())
       .then((words) => sendResponse({ ok: true, words }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Slovník se nepodařilo načíst.' }));
     return true;
   }
 
+  if (message.type === 'CHECK_SUPABASE_SCHEMA') {
+    checkSupabaseSchema(message.settings || null)
+      .then((result) => {
+        rememberSupabaseReady(result.ready === true, message.settings || null);
+        ensureLatencyWatch({ reshuffle: true });
+        return result;
+      })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => {
+        rememberSupabaseReady(false, message.settings || null);
+        ensureLatencyWatch({ reshuffle: true });
+        sendResponse({
+          ok: false,
+          ready: false,
+          error: error instanceof Error ? error.message : 'Kontrola databáze se nezdařila.',
+        });
+      });
+    return true;
+  }
+
+  if (message.type === 'PREPARE_SUPABASE_INSTALL') {
+    prepareSupabaseInstall(message.settings || null)
+      .then((result) => {
+        rememberSupabaseReady(result.ready === true, message.settings || null);
+        return result;
+      })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : 'Příprava instalace databáze se nezdařila.',
+      }));
+    return true;
+  }
+
   if (message.type === 'DELETE_WORD') {
     noteUserActivity();
-    deleteWordEverywhere(message.word, message.cardId)
+    requireSupabaseReady()
+      .then(() => deleteWordEverywhere(message.word, message.cardId))
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({
         ok: false,
@@ -203,7 +255,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'SYNC_KNOWN_WORDS') {
     noteUserActivity();
-    syncKnownWordsToSupabase()
+    requireSupabaseReady()
+      .then(() => syncKnownWordsToSupabase())
       .then((result) => reply(sendResponse, { ok: true, ...result }))
       .catch((error) => reply(sendResponse, {
         ok: false,
@@ -213,22 +266,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_KNOWN_WORDS_SYNC_STATUS') {
-    chrome.storage.sync.get(DEFAULTS)
+    requireSupabaseReady()
+      .then(() => chrome.storage.sync.get(DEFAULTS))
       .then((settings) => ensureImportProgress(settings, { forceRefreshTotals: Boolean(message.refreshTotals) }))
       .then((progress) => reply(sendResponse, { ok: true, progress }))
       .catch(async (error) => {
         const fallback = await readImportProgress();
         reply(sendResponse, {
-          ok: true,
+          ok: false,
           progress: fallback,
-          warning: error instanceof Error ? error.message : 'Stav importu se nepodařilo obnovit.',
+          error: error instanceof Error ? error.message : 'Stav importu se nepodařilo obnovit.',
         });
       });
     return true;
   }
 
   if (message.type === 'RESET_LINGQ_IMPORT_PROGRESS') {
-    chrome.storage.sync.get(DEFAULTS)
+    requireSupabaseReady()
+      .then(() => chrome.storage.sync.get(DEFAULTS))
       .then(async (settings) => {
         const fresh = enrichImportProgress(defaultImportProgress(settings.language || 'en'));
         await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: fresh });
@@ -243,14 +298,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_USAGE_STATS') {
-    getUsageStats(message.period)
+    requireSupabaseReady()
+      .then(() => getUsageStats(message.period))
       .then((stats) => sendResponse({ ok: true, stats }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Statistiky se nepodařilo načíst.' }));
     return true;
   }
 
   if (message.type === 'GET_LATENCY_STATS') {
-    getLatencyStats()
+    requireSupabaseReady()
+      .then(() => getLatencyStats())
       .then((latency) => sendResponse({ ok: true, latency }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Odezvu se nepodařilo načíst.' }));
     return true;
@@ -1809,10 +1866,14 @@ function getErrorMessage(error) {
 }
 
 async function attachSupabaseViewCount(result, settings) {
-  if (!result?.word) {
+  if (!result?.word || !isSupabaseConfigured(settings)) {
     return null;
   }
   try {
+    const gate = await getSupabaseGate();
+    if (!gate.ready) {
+      return null;
+    }
     const row = await syncSupabaseWord('touch_word', {
       word: result.word,
       translation: result.translation,
@@ -1829,12 +1890,334 @@ async function attachSupabaseViewCount(result, settings) {
 }
 
 function queueSupabaseUpdate(fields, settings) {
-  if (!fields?.word) {
+  if (!fields?.word || !isSupabaseConfigured(settings)) {
     return;
   }
-  syncSupabaseWord('update_word_fields', fields, settings).catch(() => {
-    // Aktualizace LingQ už proběhla; databáze se zkusí příště.
+  getSupabaseGate().then((gate) => {
+    if (!gate.ready) {
+      return;
+    }
+    syncSupabaseWord('update_word_fields', fields, settings).catch(() => {
+      // Aktualizace LingQ už proběhla; databáze se zkusí příště.
+    });
+  }).catch(() => {});
+}
+
+const EXTENSION_SCHEMA_VERSION = '3';
+const SUPABASE_INSTALL_SQL_FILES = [
+  'supabase/schema.sql',
+  'supabase/import_known_words.sql',
+  'supabase/usage_stats.sql',
+  'supabase/latency.sql',
+  'supabase/latency_status_phrase.sql',
+  'supabase/schema_version.sql',
+];
+const SUPABASE_DB_REQUIRED_MESSAGE = 'Supabase není připravená. V Nastavení vyplňte URL a klíč, nainstalujte schéma a spusťte Zkontrolovat databázi.';
+
+let supabaseReadyCache = {
+  key: '',
+  ready: false,
+  checkedAt: 0,
+  message: '',
+};
+const SUPABASE_READY_TTL_MS = 5 * 60 * 1000;
+
+function isSupabaseConfigured(settings) {
+  const baseUrl = String(settings?.supabaseUrl || '').trim().replace(/\/$/, '');
+  const apiKey = String(settings?.supabaseKey || '').trim();
+  return Boolean(baseUrl && apiKey);
+}
+
+function supabaseSettingsCacheKey(settings) {
+  return `${String(settings?.supabaseUrl || '').trim().replace(/\/$/, '')}|${String(settings?.supabaseKey || '').trim()}`;
+}
+
+function invalidateSupabaseReadyCache() {
+  supabaseReadyCache = { key: '', ready: false, checkedAt: 0, message: '' };
+}
+
+function rememberSupabaseReady(ready, override = null) {
+  const settings = override || {};
+  // Přepočet klíče z override, jinak necháme prázdný — getSupabaseGate doplní ze storage.
+  const key = supabaseSettingsCacheKey(settings);
+  supabaseReadyCache = {
+    key,
+    ready: ready === true,
+    checkedAt: Date.now(),
+    message: ready
+      ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
+      : SUPABASE_DB_REQUIRED_MESSAGE,
+  };
+}
+
+async function getSupabaseGate({ force = false } = {}) {
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const configured = isSupabaseConfigured(settings);
+  if (!configured) {
+    invalidateSupabaseReadyCache();
+    return {
+      ready: false,
+      configured: false,
+      message: 'Nejdříve vyplňte Supabase URL a publishable klíč v Nastavení.',
+      expectedVersion: EXTENSION_SCHEMA_VERSION,
+      installedVersion: null,
+    };
+  }
+
+  const key = supabaseSettingsCacheKey(settings);
+  const cacheHit = !force
+    && supabaseReadyCache.key === key
+    && supabaseReadyCache.checkedAt
+    && (Date.now() - supabaseReadyCache.checkedAt) < SUPABASE_READY_TTL_MS;
+  if (cacheHit) {
+    return {
+      ready: supabaseReadyCache.ready,
+      configured: true,
+      message: supabaseReadyCache.message || (supabaseReadyCache.ready
+        ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
+        : SUPABASE_DB_REQUIRED_MESSAGE),
+      expectedVersion: EXTENSION_SCHEMA_VERSION,
+      installedVersion: null,
+      fromCache: true,
+    };
+  }
+
+  try {
+    const check = await checkSupabaseSchema(settings);
+    supabaseReadyCache = {
+      key,
+      ready: check.ready === true,
+      checkedAt: Date.now(),
+      message: check.message,
+    };
+    return {
+      ...check,
+      ready: check.ready === true,
+      configured: true,
+      fromCache: false,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : SUPABASE_DB_REQUIRED_MESSAGE;
+    supabaseReadyCache = {
+      key,
+      ready: false,
+      checkedAt: Date.now(),
+      message,
+    };
+    return {
+      ready: false,
+      configured: true,
+      message,
+      expectedVersion: EXTENSION_SCHEMA_VERSION,
+      installedVersion: null,
+      fromCache: false,
+    };
+  }
+}
+
+async function requireSupabaseReady() {
+  const gate = await getSupabaseGate();
+  if (!gate.ready) {
+    throw new Error(gate.message || SUPABASE_DB_REQUIRED_MESSAGE);
+  }
+  return gate;
+}
+
+async function resolveSupabaseSettings(override = null) {
+  const stored = await chrome.storage.sync.get(DEFAULTS);
+  const baseUrl = String(override?.supabaseUrl || stored.supabaseUrl || '').trim().replace(/\/$/, '');
+  const apiKey = String(override?.supabaseKey || stored.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    throw new Error('Nejdříve vyplňte Supabase URL a publishable klíč.');
+  }
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(baseUrl)) {
+    throw new Error('Supabase URL má vypadat jako https://xxxx.supabase.co');
+  }
+  return { baseUrl, apiKey, projectRef: baseUrl.replace(/^https:\/\//i, '').split('.')[0] };
+}
+
+async function supabaseRest(baseUrl, apiKey, path, { method = 'GET', body = null } = {}) {
+  const headers = {
+    apikey: apiKey,
+    Authorization: `Bearer ${apiKey}`,
+    Accept: 'application/json',
+  };
+  if (body != null) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers,
+    body: body == null ? undefined : JSON.stringify(body),
   });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return { response, text, json };
+}
+
+function supabaseMissingMessage(payload) {
+  const text = typeof payload === 'string'
+    ? payload
+    : String(payload?.message || payload?.error || JSON.stringify(payload || '') || '');
+  return /could not find|does not exist|schema cache|PGRST/i.test(text);
+}
+
+async function checkSupabaseSchema(override = null) {
+  const { baseUrl, apiKey } = await resolveSupabaseSettings(override);
+  const missing = [];
+  const present = [];
+
+  const tableChecks = [
+    {
+      id: 'words',
+      path: '/rest/v1/words?select=id,word,language,translation,status,view_count,lingq_card_id,created_at,updated_at,import_note,importance,popularity&limit=1',
+    },
+    {
+      id: 'usage_events',
+      path: '/rest/v1/usage_events?select=id,event_type,word,language,status,created_at&limit=1',
+    },
+    {
+      id: 'lingq_latency',
+      path: '/rest/v1/lingq_latency?select=id,kind,word,language,word_status,duration_ms,ok,error,created_at&limit=1',
+    },
+    {
+      id: 'lingq_extension_meta',
+      path: '/rest/v1/lingq_extension_meta?select=key,value,updated_at&limit=1',
+    },
+  ];
+
+  for (const check of tableChecks) {
+    const { response, json, text } = await supabaseRest(baseUrl, apiKey, check.path);
+    if (response.ok) {
+      present.push(`tabulka ${check.id}`);
+    } else if (response.status === 401 || response.status === 403) {
+      throw new Error('Supabase klíč není platný nebo nemá oprávnění ke čtení tabulek.');
+    } else if (supabaseMissingMessage(json || text)) {
+      missing.push(`tabulka ${check.id}`);
+    } else {
+      missing.push(`tabulka ${check.id} (chyba ${response.status})`);
+    }
+  }
+
+  const requiredRpcs = ['touch_word', 'update_word_fields', 'import_lingq_words', 'get_usage_stats'];
+  const openApiResponse = await fetch(`${baseUrl}/rest/v1/`, {
+    method: 'GET',
+    headers: {
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/openapi+json',
+    },
+  });
+  let rpcPaths = new Set();
+  if (openApiResponse.ok) {
+    try {
+      const spec = await openApiResponse.json();
+      Object.keys(spec?.paths || {}).forEach((path) => {
+        const match = path.match(/^\/rpc\/([^/{]+)/);
+        if (match) {
+          rpcPaths.add(match[1]);
+        }
+      });
+    } catch {
+      rpcPaths = new Set();
+    }
+  }
+
+  for (const rpcName of requiredRpcs) {
+    if (rpcPaths.size > 0) {
+      if (rpcPaths.has(rpcName)) {
+        present.push(`funkce ${rpcName}`);
+      } else {
+        missing.push(`funkce ${rpcName}`);
+      }
+      continue;
+    }
+
+    // Fallback bez OpenAPI — bez zápisu slovíček (prázdné / neúplné args).
+    const body = rpcName === 'import_lingq_words'
+      ? { p_language: 'en', p_words: [], p_statuses: [] }
+      : (rpcName === 'get_usage_stats' ? { p_language: 'en' } : {});
+    const { response, json, text } = await supabaseRest(baseUrl, apiKey, `/rest/v1/rpc/${rpcName}`, {
+      method: 'POST',
+      body,
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Supabase klíč není platný nebo nemá oprávnění k RPC funkcím.');
+    }
+    if (supabaseMissingMessage(json || text)) {
+      missing.push(`funkce ${rpcName}`);
+    } else {
+      present.push(`funkce ${rpcName}`);
+    }
+  }
+
+  let installedVersion = null;
+  const versionProbe = await supabaseRest(
+    baseUrl,
+    apiKey,
+    '/rest/v1/lingq_extension_meta?select=value&key=eq.schema_version&limit=1',
+  );
+  if (versionProbe.response.ok && Array.isArray(versionProbe.json) && versionProbe.json[0]?.value) {
+    installedVersion = String(versionProbe.json[0].value);
+  }
+
+  const structureOk = missing.length === 0;
+  const versionOk = installedVersion === EXTENSION_SCHEMA_VERSION;
+  const ready = structureOk && versionOk;
+
+  let message;
+  if (ready) {
+    message = `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`;
+  } else if (structureOk && !installedVersion) {
+    message = `Struktura vypadá v pořádku, ale chybí značka verze. Spusťte „Nainstalovat / aktualizovat“ (doplní schema_version).`;
+  } else if (structureOk && !versionOk) {
+    message = `Struktura existuje, ale verze schématu je ${installedVersion || '?'} (doplněk očekává ${EXTENSION_SCHEMA_VERSION}). Spusťte aktualizaci.`;
+  } else {
+    message = `Chybí: ${missing.join(', ')}. Spusťte instalaci databáze.`;
+  }
+
+  return {
+    ready,
+    structureOk,
+    versionOk,
+    expectedVersion: EXTENSION_SCHEMA_VERSION,
+    installedVersion,
+    missing,
+    present,
+    message,
+  };
+}
+
+async function loadSupabaseInstallSql() {
+  const chunks = [];
+  for (const file of SUPABASE_INSTALL_SQL_FILES) {
+    const response = await fetch(chrome.runtime.getURL(file));
+    if (!response.ok) {
+      throw new Error(`Nepodařilo se načíst ${file}.`);
+    }
+    const text = (await response.text()).trim();
+    chunks.push(`-- ===== ${file} =====\n${text}`);
+  }
+  return `${chunks.join('\n\n')}\n`;
+}
+
+async function prepareSupabaseInstall(override = null) {
+  const { projectRef } = await resolveSupabaseSettings(override);
+  const check = await checkSupabaseSchema(override);
+  const sql = await loadSupabaseInstallSql();
+  const editorUrl = `https://supabase.com/dashboard/project/${encodeURIComponent(projectRef)}/sql/new`;
+  return {
+    ...check,
+    sql,
+    editorUrl,
+    fileCount: SUPABASE_INSTALL_SQL_FILES.length,
+    needsInstall: !check.ready,
+  };
 }
 
 async function listSupabaseWords() {
@@ -2102,7 +2485,12 @@ async function noteUserActivity() {
 
 async function ensureLatencyWatch(options = {}) {
   const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false) {
+  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+    await chrome.alarms.clear(LATENCY_ALARM);
+    return;
+  }
+  const gate = await getSupabaseGate().catch(() => ({ ready: false }));
+  if (!gate.ready) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -2116,7 +2504,12 @@ async function ensureLatencyWatch(options = {}) {
 
 async function scheduleNextProbe({ fromNow = true } = {}) {
   const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false) {
+  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+    await chrome.alarms.clear(LATENCY_ALARM);
+    return;
+  }
+  const gate = await getSupabaseGate().catch(() => ({ ready: false }));
+  if (!gate.ready) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -2137,7 +2530,11 @@ async function armLatencyAlarm(nextProbeAt) {
 
 async function onLatencyAlarm() {
   const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false) {
+  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+    return;
+  }
+  const gate = await getSupabaseGate().catch(() => ({ ready: false }));
+  if (!gate.ready) {
     return;
   }
   const stored = await chrome.storage.session.get('latencyNextProbeAt');
@@ -2268,11 +2665,15 @@ function latencyWordStatus(result) {
 async function recordLatency(sample) {
   try {
     const settings = await chrome.storage.sync.get(DEFAULTS);
-    const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
-    const apiKey = String(settings.supabaseKey || '').trim();
-    if (!baseUrl || !apiKey) {
+    if (!isSupabaseConfigured(settings)) {
       return;
     }
+    const gate = await getSupabaseGate();
+    if (!gate.ready) {
+      return;
+    }
+    const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+    const apiKey = String(settings.supabaseKey || '').trim();
     const payload = {
       kind: latencySourceKind(sample.source),
       word: String(sample.word || '').replace(/\s+/g, ' ').trim().slice(0, 200).toLowerCase(),
@@ -2303,11 +2704,15 @@ async function recordLatency(sample) {
 async function logUsageEvent(eventType, fields = {}) {
   try {
     const settings = await chrome.storage.sync.get(DEFAULTS);
-    const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
-    const apiKey = String(settings.supabaseKey || '').trim();
-    if (!baseUrl || !apiKey) {
+    if (!isSupabaseConfigured(settings)) {
       return;
     }
+    const gate = await getSupabaseGate();
+    if (!gate.ready) {
+      return;
+    }
+    const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+    const apiKey = String(settings.supabaseKey || '').trim();
     await fetch(`${baseUrl}/rest/v1/usage_events`, {
       method: 'POST',
       headers: {
@@ -2490,6 +2895,10 @@ async function syncSupabaseWord(rpcName, fields, settings) {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
+    return null;
+  }
+  const gate = await getSupabaseGate();
+  if (!gate.ready) {
     return null;
   }
 

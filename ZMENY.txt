@@ -208,3 +208,46 @@ Verze 0.2.25
 - Stabilní release: Import z LingQ do DB, filtr znalosti ve Slovníku, mazání slovíčka z LingQ i DB.
 - Import Vocabulary karet i known words po dávkách (max 5 000) s cooldownem; záložka Import oddělená od Slovníku.
 - Mazání ze Slovníku nejdřív ověří smazání v LingQ (v3/v2, u known words create+delete); při chybě DB zůstane.
+
+Verze 0.2.26
+6. 11. 2026 19:00
+- Nová záložka Autor: Karel Gajda, gajda.karel@gmail.com.
+- V nastavení je odkaz na stránku LingQ s API klíčem.
+
+Verze 0.2.27
+6. 11. 2026 19:04
+- Na záložce Autor je návod: bezplatné založení Supabase a zapojení do doplňku (URL, klíč, SQL soubory).
+
+Verze 0.2.28
+6. 11. 2026 19:07
+- V Návodu je postup k ChatGPT API klíči včetně upozornění, že API je placené.
+
+Verze 0.2.29
+6. 11. 2026 19:09
+- V Návodu je u ChatGPT ceník modelů z Nastavení s datem 6. 11. 2026.
+
+Verze 0.2.30
+6. 11. 2026 19:19
+- Nastavení: nahoře běžný chod doplňku, dole pohromadě klíče (LingQ, ChatGPT) a údaje Supabase.
+
+Verze 0.2.31
+6. 11. 2026 19:23
+- Záložka Autor přejmenována na Návod; jméno a e-mail autora jsou úplně dole.
+
+Verze 0.2.32
+6. 11. 2026 19:24
+- U Supabase publishable klíče je tlačítko Zobrazit / Skrýt.
+
+Verze 0.2.33
+6. 11. 2026 19:27
+- V Nastavení je kontrola a instalace/aktualizace schématu Supabase (verze schématu, SQL do schránky + SQL Editor).
+- Přidaný supabase/schema_version.sql pro sledování verze DB po aktualizacích doplňku.
+
+Verze 0.2.34
+6. 11. 2026 19:35
+- Návod k Supabase doplněn o kontrolu DB, vkládání SQL ze schránky + Run a upozornění na možné poškození dat.
+
+Verze 0.2.35
+6. 11. 2026 19:39
+- Stabilní release: funkce vázané na Supabase (Slovník, Import, Statistiky, Odezva, sync) fungují jen po vyplnění údajů a úspěšné kontrole schématu.
+- Kontrola/instalace DB v Nastavení; Návod; záložka Návod; přehlednější Nastavení; mazání slovíček z LingQ i DB.
