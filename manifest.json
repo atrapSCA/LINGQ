@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 3,
   "name": "LingQ Click Translator (Admin)",
-  "version": "0.2.40",
+  "version": "0.3.0",
   "description": "Click any word on any web page to look up or create a LingQ and see its translation as a tooltip.",
   "permissions": ["storage", "activeTab", "contextMenus", "alarms", "clipboardWrite"],
   "host_permissions": [
@@ -29,13 +29,16 @@
     "default_popup": "popup.html",
     "default_title": "LingQ Click Translator (Admin)"
   },
+  "options_ui": {
+    "page": "app.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["role.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
   ]
 }
-

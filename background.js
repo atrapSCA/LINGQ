@@ -14,6 +14,7 @@ const DEFAULTS = {
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
+  lingqEnabled: true,
   supabaseEnabled: true,
   supabaseUrl: '',
   supabaseKey: '',
@@ -35,7 +36,9 @@ function resolveChatgptModel(settings) {
 const LATENCY_ALARM = 'lingq-latency-watch';
 const PROBE_FALLBACK_WORD = 'the';
 const PROBE_LANGUAGE = 'en';
+const APP_PAGE = 'app.html';
 let activeUserLookups = 0;
+let appTabId = null;
 
 function iconPaths(enabled) {
   const state = enabled ? 'on' : 'off';
@@ -84,6 +87,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     invalidateSupabaseReadyCache();
     ensureLatencyWatch({ reshuffle: true });
   }
+  if (changes.lingqEnabled) {
+    ensureLatencyWatch({ reshuffle: true });
+    const wasOff = changes.lingqEnabled.oldValue === false;
+    const isOn = changes.lingqEnabled.newValue !== false;
+    if (wasOff && isOn) {
+      syncDbToLingq().catch(() => {});
+    }
+  }
   if (changes.latencyIdleMinSeconds || changes.latencyIdleMaxSeconds || changes.enabled) {
     ensureLatencyWatch({ reshuffle: true });
   }
@@ -96,7 +107,66 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 syncActionIcon();
 ensureLatencyWatch();
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === appTabId) {
+    appTabId = null;
+  }
+});
+
+async function openAppPage() {
+  const url = chrome.runtime.getURL(APP_PAGE);
+  if (appTabId != null) {
+    try {
+      const tab = await chrome.tabs.get(appTabId);
+      if (tab?.id != null) {
+        const update = { active: true };
+        if (!String(tab.url || '').startsWith(url)) {
+          update.url = url;
+        }
+        await chrome.tabs.update(tab.id, update);
+        if (tab.windowId != null) {
+          await chrome.windows.update(tab.windowId, { focused: true });
+        }
+        return { ok: true, reused: true };
+      }
+    } catch (_error) {
+      appTabId = null;
+    }
+  }
+
+  const tab = await chrome.tabs.create({ url });
+  appTabId = tab.id ?? null;
+  return { ok: true, reused: false };
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'OPEN_APP') {
+    openAppPage()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    return true;
+  }
+
+  if (message.type === 'SYNC_DB_TO_LINGQ') {
+    syncDbToLingq()
+      .then((state) => sendResponse({ ok: true, sync: state }))
+      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    return true;
+  }
+
+  if (message.type === 'GET_LINGQ_SYNC_STATUS') {
+    sendResponse({ ok: true, sync: lingqSyncState });
+    return false;
+  }
+
+  if (message.type === 'APP_OPENED') {
+    if (sender.tab?.id != null) {
+      appTabId = sender.tab.id;
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.type === 'LOOKUP_WORD') {
     noteUserActivity();
     activeUserLookups += 1;
@@ -324,11 +394,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function lookupWord(word, options = {}) {
   const probe = options.probe === true;
   const settings = await chrome.storage.sync.get(DEFAULTS);
-  if (!settings.apiKey) {
-    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
-  }
   if (probe) {
     settings.language = PROBE_LANGUAGE;
+  }
+
+  if (!isLingqEnabled(settings)) {
+    if (probe) {
+      throw new Error('Idle kontrola LingQ je vypnutá (LingQ je vypnuté).');
+    }
+    return lookupWordOffline(word, settings);
+  }
+
+  if (!settings.apiKey) {
+    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
   }
 
   const cleanWord = normalizeWord(word);
@@ -397,7 +475,21 @@ async function lookupWord(word, options = {}) {
   return result;
 }
 
+function isLingqEnabled(settings) {
+  return settings?.lingqEnabled !== false;
+}
+
+function canUseOfflineMode(settings) {
+  return isSupabaseConfigured(settings)
+    && isChatgptEnabled(settings)
+    && Boolean(String(settings?.chatgptApiKey || '').trim())
+    && settings?.chatgptApiKeyValid === true;
+}
+
 function resolveAlternativesSource(settings) {
+  if (!isLingqEnabled(settings)) {
+    return 'chatgpt';
+  }
   const hasKey = Boolean(String(settings.chatgptApiKey || '').trim());
   if (
     isChatgptEnabled(settings)
@@ -411,6 +503,9 @@ function resolveAlternativesSource(settings) {
 }
 
 function resolveNewWordTranslationSource(settings) {
+  if (!isLingqEnabled(settings)) {
+    return 'chatgpt';
+  }
   const hasKey = Boolean(String(settings.chatgptApiKey || '').trim());
   if (
     isChatgptEnabled(settings)
@@ -421,6 +516,198 @@ function resolveNewWordTranslationSource(settings) {
     return 'chatgpt';
   }
   return 'lingq';
+}
+
+async function lookupWordOffline(word, settings) {
+  if (!canUseOfflineMode(settings)) {
+    throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+  }
+  const gate = await getSupabaseGate();
+  if (!gate.ready) {
+    throw new Error(gate.message || SUPABASE_DB_REQUIRED_MESSAGE);
+  }
+
+  const cleanWord = normalizeWord(word);
+  if (!cleanWord) {
+    throw new Error('Chybí slovo k překladu.');
+  }
+
+  const existing = await fetchSupabaseWordRow(cleanWord, settings);
+  if (existing) {
+    const touched = await syncSupabaseWord('touch_word', {
+      word: cleanWord,
+      translation: existing.translation,
+      status: Number(existing.status) || 1,
+      cardId: existing.lingq_card_id,
+      needsLingqSync: true,
+    }, settings);
+    const row = touched || existing;
+    const translation = String(row.translation || existing.translation || '').trim() || 'Překlad není k dispozici.';
+    const status = Number(row.status) || Number(existing.status) || 1;
+    return {
+      word: cleanWord,
+      translation,
+      translations: [translation],
+      status,
+      cardId: row.lingq_card_id ?? existing.lingq_card_id ?? null,
+      created: false,
+      unknown: status <= 1,
+      viewCount: Number(row.view_count) > 1 ? Number(row.view_count) : null,
+      alternativesSource: 'chatgpt',
+    };
+  }
+
+  const translations = await fetchChatgptPrimaryTranslations(cleanWord, settings);
+  const translation = translations[0] || 'Překlad nebyl nalezen.';
+  const row = await syncSupabaseWord('touch_word', {
+    word: cleanWord,
+    translation,
+    status: 1,
+    needsLingqSync: true,
+  }, settings);
+
+  return {
+    word: cleanWord,
+    translation,
+    translations,
+    status: Number(row?.status) || 1,
+    cardId: row?.lingq_card_id ?? null,
+    created: true,
+    unknown: true,
+    viewCount: null,
+    alternativesSource: 'chatgpt',
+  };
+}
+
+async function fetchSupabaseWordRow(word, settings) {
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    return null;
+  }
+  const language = encodeURIComponent(settings.language || 'en');
+  const term = encodeURIComponent(normalizeWord(word));
+  const { response, json } = await supabaseRest(
+    baseUrl,
+    apiKey,
+    `/rest/v1/words?select=word,language,translation,status,view_count,lingq_card_id,needs_lingq_sync&word=eq.${term}&language=eq.${language}&limit=1`,
+  );
+  if (!response.ok || !Array.isArray(json) || json.length === 0) {
+    return null;
+  }
+  return json[0];
+}
+
+async function fetchWordsNeedingLingqSync(settings) {
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  if (!baseUrl || !apiKey) {
+    return [];
+  }
+  const language = encodeURIComponent(settings.language || 'en');
+  const { response, json } = await supabaseRest(
+    baseUrl,
+    apiKey,
+    `/rest/v1/words?select=word,translation,status,lingq_card_id&needs_lingq_sync=eq.true&language=eq.${language}&order=updated_at.asc&limit=500`,
+  );
+  if (!response.ok || !Array.isArray(json)) {
+    throw new Error(`Nepodařilo se načíst slovíčka ke synchronizaci (${response.status}).`);
+  }
+  return json;
+}
+
+let lingqSyncState = {
+  running: false,
+  done: 0,
+  total: 0,
+  errors: 0,
+  message: '',
+};
+
+async function syncDbToLingq() {
+  if (lingqSyncState.running) {
+    return lingqSyncState;
+  }
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  if (!isLingqEnabled(settings)) {
+    return lingqSyncState;
+  }
+  if (!settings.apiKey) {
+    lingqSyncState = {
+      running: false,
+      done: 0,
+      total: 0,
+      errors: 0,
+      message: 'LingQ je zapnuté, ale chybí API klíč — synchronizace přeskočena.',
+    };
+    return lingqSyncState;
+  }
+  if (!isSupabaseConfigured(settings)) {
+    return lingqSyncState;
+  }
+
+  lingqSyncState = {
+    running: true,
+    done: 0,
+    total: 0,
+    errors: 0,
+    message: 'Synchronizuji databázi do LingQ…',
+  };
+
+  try {
+    const rows = await fetchWordsNeedingLingqSync(settings);
+    lingqSyncState.total = rows.length;
+    if (rows.length === 0) {
+      lingqSyncState = {
+        running: false,
+        done: 0,
+        total: 0,
+        errors: 0,
+        message: 'Není co synchronizovat do LingQ.',
+      };
+      return lingqSyncState;
+    }
+
+    for (const row of rows) {
+      try {
+        const word = normalizeWord(row.word);
+        const translation = String(row.translation || word).trim() || word;
+        const status = Number(row.status) || 1;
+        const cardId = await ensureCardId(row.lingq_card_id, word, translation, settings);
+        const { body } = toApiStatus(status);
+        await lingqRequest(`${getApiBase(settings)}/cards/${encodeURIComponent(cardId)}/`, settings, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+        try {
+          await updateTranslation(cardId, word, translation);
+        } catch {
+          // Stav už je v LingQ; překlad zkusíme příště.
+        }
+        await syncSupabaseWord('update_word_fields', {
+          word,
+          translation,
+          status,
+          cardId,
+          needsLingqSync: false,
+        }, settings);
+        lingqSyncState.done += 1;
+      } catch {
+        lingqSyncState.errors += 1;
+      }
+      lingqSyncState.message = `Synchronizace do LingQ: ${lingqSyncState.done}/${lingqSyncState.total}`
+        + (lingqSyncState.errors ? ` · chyby ${lingqSyncState.errors}` : '');
+    }
+
+    lingqSyncState.running = false;
+    lingqSyncState.message = lingqSyncState.errors
+      ? `Synchronizace hotová: ${lingqSyncState.done}/${lingqSyncState.total}, chyby ${lingqSyncState.errors}.`
+      : `Synchronizace hotová: ${lingqSyncState.done}/${lingqSyncState.total}.`;
+  } catch (error) {
+    lingqSyncState.running = false;
+    lingqSyncState.message = getErrorMessage(error);
+  }
+  return lingqSyncState;
 }
 
 async function translateNewWord(word, settings) {
@@ -747,11 +1034,28 @@ async function ensureCardId(cardId, word, translation, settings) {
 
 async function updateStatus(cardId, status, word, translation = '') {
   const settings = await chrome.storage.sync.get(DEFAULTS);
+  const { apiStatus, body } = toApiStatus(status);
+  if (!isLingqEnabled(settings)) {
+    if (!canUseOfflineMode(settings)) {
+      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+    }
+    const uiStatus = Number(status);
+    await syncSupabaseWord('update_word_fields', {
+      word,
+      status: uiStatus,
+      translation,
+      cardId: cardId || null,
+      needsLingqSync: true,
+    }, settings);
+    return {
+      status: uiStatus,
+      cardId: cardId || null,
+    };
+  }
   if (!settings.apiKey) {
     throw new Error('Tuto kartu nelze aktualizovat.');
   }
   const resolvedCardId = await ensureCardId(cardId, word, translation, settings);
-  const { apiStatus, body } = toApiStatus(status);
   const url = `${getApiBase(settings)}/cards/${encodeURIComponent(resolvedCardId)}/`;
   const response = await lingqRequest(url, settings, {
     method: 'PUT',
@@ -768,6 +1072,7 @@ async function updateStatus(cardId, status, word, translation = '') {
       word,
       status: savedStatus,
       cardId: resolvedCardId,
+      needsLingqSync: false,
     }, settings);
   }
   return {
@@ -779,11 +1084,23 @@ async function updateStatus(cardId, status, word, translation = '') {
 async function updateTranslation(cardId, word, translation) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const text = String(translation || '').replace(/\s+/g, ' ').trim();
-  if (!settings.apiKey) {
-    throw new Error('Tuto kartu nelze aktualizovat.');
-  }
   if (!text) {
     throw new Error('Překlad nemůže být prázdný.');
+  }
+  if (!isLingqEnabled(settings)) {
+    if (!canUseOfflineMode(settings)) {
+      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+    }
+    await syncSupabaseWord('update_word_fields', {
+      word,
+      translation: text,
+      cardId: cardId || null,
+      needsLingqSync: true,
+    }, settings);
+    return { translation: text, cardId: cardId || null };
+  }
+  if (!settings.apiKey) {
+    throw new Error('Tuto kartu nelze aktualizovat.');
   }
 
   const resolvedCardId = await ensureCardId(cardId, word, text, settings);
@@ -802,6 +1119,7 @@ async function updateTranslation(cardId, word, translation) {
       word,
       translation: text,
       cardId: resolvedCardId,
+      needsLingqSync: false,
     }, settings);
     return { translation: text, cardId: resolvedCardId };
   }
@@ -825,6 +1143,7 @@ async function updateTranslation(cardId, word, translation) {
     word,
     translation: text,
     cardId: resolvedCardId,
+    needsLingqSync: false,
   }, settings);
   return { translation: text, cardId: resolvedCardId };
 }
@@ -859,13 +1178,21 @@ function toApiStatus(status) {
 
 async function translatePhrase(text) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
-  if (!settings.apiKey) {
-    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
-  }
-
   const phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) {
     throw new Error('Vyberte větu.');
+  }
+
+  if (!isLingqEnabled(settings)) {
+    if (!canUseOfflineMode(settings)) {
+      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+    }
+    const translation = await fetchChatgptPhraseTranslation(phrase, settings);
+    return { sentence: phrase, translation };
+  }
+
+  if (!settings.apiKey) {
+    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
   }
 
   try {
@@ -883,6 +1210,32 @@ async function translatePhrase(text) {
     throw new Error('Překlad věty se nepodařilo získat.');
   }
   return { sentence: phrase, translation };
+}
+
+async function fetchChatgptPhraseTranslation(phrase, settings) {
+  const sourceName = languageLabel(settings.language);
+  const targetName = languageLabel(settings.targetLanguage);
+  const parsed = await callChatgptJson(settings, [
+    {
+      role: 'system',
+      content: 'You translate short phrases for language learners. Reply with JSON only.',
+    },
+    {
+      role: 'user',
+      content: [
+        `Phrase in ${sourceName}: "${phrase}"`,
+        `Target language: ${targetName}`,
+        'Return JSON object {"translations":["..."]} with one natural translation first.',
+        'No explanations.',
+      ].join('\n'),
+    },
+  ]);
+  const translations = parseChatgptTranslationList(parsed);
+  const translation = translations[0] || '';
+  if (!translation || translation.toLowerCase() === phrase.toLowerCase()) {
+    throw new Error('ChatGPT nevrátilo použitelný překlad věty.');
+  }
+  return translation;
 }
 
 async function translateWithLingq(phrase, settings) {
@@ -1918,13 +2271,14 @@ function queueSupabaseUpdate(fields, settings) {
   }).catch(() => {});
 }
 
-const EXTENSION_SCHEMA_VERSION = '3';
+const EXTENSION_SCHEMA_VERSION = '4';
 const SUPABASE_INSTALL_SQL_FILES = [
   'supabase/schema.sql',
   'supabase/import_known_words.sql',
   'supabase/usage_stats.sql',
   'supabase/latency.sql',
   'supabase/latency_status_phrase.sql',
+  'supabase/lingq_offline_sync.sql',
   'supabase/schema_version.sql',
 ];
 const SUPABASE_DB_REQUIRED_MESSAGE = 'Supabase není připravená. V Nastavení vyplňte URL a klíč, nainstalujte schéma a spusťte Zkontrolovat databázi.';
@@ -1934,6 +2288,9 @@ let supabaseReadyCache = {
   ready: false,
   checkedAt: 0,
   message: '',
+  versionOk: true,
+  structureOk: true,
+  installedVersion: null,
 };
 const SUPABASE_READY_TTL_MS = 5 * 60 * 1000;
 
@@ -1959,7 +2316,15 @@ function supabaseSettingsCacheKey(settings) {
 }
 
 function invalidateSupabaseReadyCache() {
-  supabaseReadyCache = { key: '', ready: false, checkedAt: 0, message: '' };
+  supabaseReadyCache = {
+    key: '',
+    ready: false,
+    checkedAt: 0,
+    message: '',
+    versionOk: true,
+    structureOk: true,
+    installedVersion: null,
+  };
 }
 
 function rememberSupabaseReady(ready, override = null, message = '') {
@@ -1973,6 +2338,9 @@ function rememberSupabaseReady(ready, override = null, message = '') {
       || (ready
         ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
         : SUPABASE_DB_REQUIRED_MESSAGE),
+    versionOk: ready === true,
+    structureOk: ready === true,
+    installedVersion: ready === true ? EXTENSION_SCHEMA_VERSION : null,
   };
 }
 
@@ -2011,11 +2379,14 @@ async function getSupabaseGate({ force = false } = {}) {
     return {
       ready: supabaseReadyCache.ready,
       configured: true,
+      enabled: true,
       message: supabaseReadyCache.message || (supabaseReadyCache.ready
         ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
         : SUPABASE_DB_REQUIRED_MESSAGE),
       expectedVersion: EXTENSION_SCHEMA_VERSION,
-      installedVersion: null,
+      installedVersion: supabaseReadyCache.installedVersion,
+      versionOk: supabaseReadyCache.versionOk !== false,
+      structureOk: supabaseReadyCache.structureOk !== false,
       fromCache: true,
     };
   }
@@ -2027,11 +2398,15 @@ async function getSupabaseGate({ force = false } = {}) {
       ready: check.ready === true,
       checkedAt: Date.now(),
       message: check.message,
+      versionOk: check.versionOk !== false,
+      structureOk: check.structureOk !== false,
+      installedVersion: check.installedVersion ?? null,
     };
     return {
       ...check,
       ready: check.ready === true,
       configured: true,
+      enabled: true,
       fromCache: false,
     };
   } catch (error) {
@@ -2193,13 +2568,8 @@ async function checkSupabaseSchema(override = null) {
     }
   }
 
-  // Úklid zkušebního řádku z touch_word / update_word_fields.
-  await supabaseRest(
-    baseUrl,
-    apiKey,
-    `/rest/v1/words?language=eq.en&word=eq.${encodeURIComponent(probeWord)}`,
-    { method: 'DELETE' },
-  ).catch(() => {});
+  // Úklid všech zkušebních řádků z touch_word / update_word_fields (i starších).
+  await cleanupSchemaProbeWords(baseUrl, apiKey);
 
   let installedVersion = null;
   const versionProbe = await supabaseRest(
@@ -2265,6 +2635,26 @@ async function prepareSupabaseInstall(override = null) {
   };
 }
 
+function isSchemaProbeWord(word) {
+  return /^__lingq_schema_probe_\d+__$/i.test(String(word || '').trim());
+}
+
+async function cleanupSchemaProbeWords(baseUrl, apiKey) {
+  if (!baseUrl || !apiKey) {
+    return;
+  }
+  // PostgREST: * = SQL %
+  const path = '/rest/v1/words?word=like.__lingq_schema_probe_*';
+  await fetch(`${baseUrl}${path}`, {
+    method: 'DELETE',
+    headers: {
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      Prefer: 'return=minimal',
+    },
+  }).catch(() => {});
+}
+
 async function listSupabaseWords() {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
@@ -2289,7 +2679,11 @@ async function listSupabaseWords() {
   }
 
   const rows = await response.json();
-  return Array.isArray(rows) ? rows : [];
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.some((row) => isSchemaProbeWord(row?.word))) {
+    void cleanupSchemaProbeWords(baseUrl, apiKey);
+  }
+  return list.filter((row) => !isSchemaProbeWord(row?.word));
 }
 
 async function deleteWordEverywhere(word, cardId = null) {
@@ -2415,6 +2809,17 @@ async function deleteSupabaseWord(word, settings) {
 
 function getStatsPeriodRange(period) {
   const now = new Date();
+  const calendarMatch = String(period || '').match(/^calendar-(\d{4})$/);
+
+  if (calendarMatch) {
+    const year = Number(calendarMatch[1]);
+    const start = new Date(year, 0, 1, 0, 0, 0, 0);
+    const end = year === now.getFullYear()
+      ? now
+      : new Date(year, 11, 31, 23, 59, 59, 999);
+    return { from: start.toISOString(), to: end.toISOString(), start, end };
+  }
+
   const end = now;
   const start = new Date(now);
 
@@ -2422,13 +2827,14 @@ function getStatsPeriodRange(period) {
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
   } else if (period === 'quarter') {
-    start.setMonth(start.getMonth() - 3);
+    start.setMonth(start.getMonth() - 3, start.getDate());
     start.setHours(0, 0, 0, 0);
   } else if (period === 'half') {
-    start.setMonth(start.getMonth() - 6);
+    start.setMonth(start.getMonth() - 5, 1);
     start.setHours(0, 0, 0, 0);
   } else if (period === 'year') {
-    start.setFullYear(start.getFullYear() - 1);
+    // Přesně 12 kalendářních měsíců včetně aktuálního (ne 13).
+    start.setMonth(start.getMonth() - 11, 1);
     start.setHours(0, 0, 0, 0);
   } else {
     start.setDate(start.getDate() - 29);
@@ -2535,7 +2941,7 @@ async function ensureLatencyWatch(options = {}) {
     return;
   }
   const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+  if (settings.enabled === false || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -2558,7 +2964,7 @@ async function scheduleNextProbe({ fromNow = true } = {}) {
     return;
   }
   const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+  if (settings.enabled === false || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -2975,6 +3381,9 @@ async function syncSupabaseWord(rpcName, fields, settings) {
     if (Number.isFinite(cardId)) {
       payload.p_lingq_card_id = cardId;
     }
+  }
+  if (typeof fields.needsLingqSync === 'boolean') {
+    payload.p_needs_lingq_sync = fields.needsLingqSync;
   }
 
   const response = await fetch(`${baseUrl}/rest/v1/rpc/${rpcName}`, {

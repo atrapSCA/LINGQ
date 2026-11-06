@@ -276,3 +276,16 @@ Verze 0.2.40
 - Nastavení vizuálně rozděleno do sekcí: Ostatní nastavení, ChatGPT a Supabase DB.
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
+
+Verze 0.3.0
+6. 11. 2026 21:35
+- Stabilní release: plná stránka app.html + mini popup; režim bez LingQ; úpravy slovníku a bubliny; hodinový graf odezvy.
+- Redesign: ikona otevře mini popup (zapnout/vypnout + Otevřít doplněk); hlavní UI (Slovník, Import, Statistiky, Odezva, Nastavení, Návod) na plné stránce.
+- Statistiky: kalendářní rok přes šířku stránky, šipky ← → pro změnu roku.
+- User build: překlad výběru max. 10 slov; delší výběr → Google Translate. Admin bez limitu.
+- Režim bez LingQ: při DB + ChatGPT lze LingQ vypnout; po zapnutí sync DB → LingQ (schéma v4). Upozornění na zastaralé schéma.
+- Slovník: přehlednější řádky; bez data vložení; jen slova s překladem; kliknutím na překlad úprava se syncem do LingQ i DB.
+- Bublina slova bez tlačítek kopírování; kopírování originálu/překladu jen u věty.
+- Odezva: spojnicový graf hodinových průměrů; oprava jednotek osy.
+- Schema-probe řádky (`__lingq_schema_probe_…`) se ve slovníku nezobrazují a po kontrole DB se mažou.
+- Oprava ukládání překladu do DB (`queueSupabaseUpdate`).

@@ -17,7 +17,7 @@ CREATE POLICY lingq_extension_meta_anon_all ON public.lingq_extension_meta
 GRANT SELECT, INSERT, UPDATE ON TABLE public.lingq_extension_meta TO anon, authenticated;
 
 INSERT INTO public.lingq_extension_meta (key, value, updated_at)
-VALUES ('schema_version', '3', now())
+VALUES ('schema_version', '4', now())
 ON CONFLICT (key) DO UPDATE
 SET value = EXCLUDED.value,
     updated_at = now();
