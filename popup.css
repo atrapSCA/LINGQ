@@ -49,8 +49,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
 
 .tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
   flex: 0 0 auto;
   margin: 0 16px 12px;
   padding: 4px;
@@ -66,9 +66,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
   color: #5f7278;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 8px 8px;
+  padding: 8px 4px;
 }
 
 .tab--active {
@@ -86,9 +86,25 @@ h1 { margin: 0; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; }
 
 .tab-panel[hidden],
 #panel-stats[hidden],
+#panel-latency[hidden],
 #panel-words[hidden],
+#panel-import[hidden],
 #panel-settings[hidden] {
   display: none !important;
+}
+
+#panel-latency {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 16px 8px;
+  overflow: auto;
+}
+
+#panel-latency .stats-meta,
+#panel-latency .latency-chart-wrap,
+#panel-latency .stats-table {
+  flex: 0 0 auto;
 }
 
 form {
@@ -101,18 +117,152 @@ label { display: block; margin-bottom: 6px; color: #394b52; font-size: 11px; fon
 .input-wrap { display: flex; overflow: hidden; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
 input, select { width: 100%; border: 0; outline: none; background: transparent; color: #18222b; font: inherit; font-size: 12px; }
 .input-wrap input { padding: 10px 11px; }
-#toggle-key { border: 0; border-left: 1px solid #c9d6d2; background: #f3f7f6; color: #394b52; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; padding: 0 10px; }
+#toggle-key,
+#toggle-chatgpt-key { border: 0; border-left: 1px solid #c9d6d2; background: #f3f7f6; color: #394b52; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; padding: 0 10px; }
 .help, .form-message { margin: 6px 0 0; color: #6b7b80; font-size: 10px; }
+#chatgpt-key-status[data-tone="ok"] { color: #1f7f68; }
+#chatgpt-key-status[data-tone="warn"] { color: #b45309; }
+#chatgpt-key-status[data-tone="error"] { color: #b42318; }
+#alternatives-source:disabled,
+#alternatives-source option:disabled,
+#new-word-source:disabled,
+#new-word-source option:disabled,
+#chatgpt-model:disabled {
+  color: #8a9a97;
+}
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+label[for="chatgpt-api-key"],
+label[for="new-word-source"],
+label[for="alternatives-source"],
+label[for="chatgpt-model"],
 label[for="click-count"],
+.field-label,
 label[for="supabase-url"],
 label[for="supabase-key"] { margin-top: 14px; }
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #394b52;
+  font-size: 11px;
+  font-weight: 700;
+}
+.field-grid--idle {
+  margin-top: 0;
+}
+.field-grid--idle label {
+  margin-top: 0;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
 select,
 form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px; background: white; }
 .save-button { width: 100%; margin-top: 16px; padding: 10px 12px; border: 0; border-radius: 8px; background: #18222b; color: white; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
 
 #panel-words { padding: 0 16px 8px; }
+#panel-import {
+  padding: 0 16px 8px;
+  overflow: auto;
+}
+.words-import {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d8e4df;
+  border-radius: 10px;
+  background: #f7faf9;
+  flex: 0 0 auto;
+}
+.import-progress {
+  display: grid;
+  gap: 6px;
+}
+.import-progress__totals {
+  display: grid;
+  gap: 2px;
+  color: #394b52;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.import-progress__totals strong {
+  font-weight: 700;
+}
+.import-progress__meta,
+.import-progress__scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #394b52;
+  font-size: 11px;
+  font-weight: 700;
+}
+.import-progress__scale {
+  font-weight: 600;
+  color: #6b7b80;
+}
+.import-progress__track {
+  height: 10px;
+  border-radius: 999px;
+  background: #d9e5e1;
+  overflow: hidden;
+}
+.import-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f6f62, #4dbea0);
+  transition: width 0.25s ease;
+}
+.import-button {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #18222b;
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.import-button--ghost {
+  background: transparent;
+  color: #394b52;
+  border: 1px solid #c9d6d2;
+}
+.import-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.words-import .help {
+  margin: 0;
+  color: #6b7b80;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.words-import .help code {
+  font-size: 10px;
+  word-break: break-all;
+}
+.words-import-status {
+  margin: 0;
+  color: #3f555c;
+  font-size: 11px;
+  line-height: 1.4;
+  min-height: 1.2em;
+}
+.words-import-status--error {
+  color: #a33b3b;
+}
+.words-import-status--ok {
+  color: #1f7a5c;
+}
 .words-toolbar { display: grid; gap: 8px; flex: 0 0 auto; }
+.words-toolbar__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
 .words-toolbar input,
 .words-toolbar select {
   padding: 10px 11px;
@@ -132,13 +282,37 @@ form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px
 }
 .word-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
   border-bottom: 1px solid #edf2f0;
 }
 .word-row:last-child { border-bottom: 0; }
+.word-row--deleting {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.word-row__delete {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a9aa0;
+  cursor: pointer;
+  padding: 0;
+}
+.word-row__delete:hover {
+  background: #f3e8e8;
+  color: #b42318;
+}
+.word-row__delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .word-row__main {
   min-width: 0;
   display: grid;
@@ -213,9 +387,143 @@ form > input { padding: 10px 11px; border: 1px solid #c9d6d2; border-radius: 8px
 
 .stats-toolbar,
 .stats-meta,
+.latency-chart-wrap,
 .heatmap-wrap,
 .stats-table {
   flex: 0 0 auto;
+}
+
+.latency-chart-wrap {
+  margin: 0 0 14px;
+  padding: 12px 12px 10px;
+  border: 1px solid #d8e4df;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.latency-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.latency-chart-title {
+  margin: 0;
+  color: #18222b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.latency-chart-legend {
+  display: flex;
+  gap: 10px;
+  color: #5f7278;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.latency-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.latency-legend::before {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  content: "";
+}
+
+.latency-legend--click::before {
+  background: #1f7f68;
+}
+
+.latency-legend--idle::before {
+  background: #d97706;
+}
+
+.latency-legend--phrase::before {
+  background: #3b82f6;
+}
+
+.latency-chart {
+  width: 100%;
+  min-height: 168px;
+}
+
+.latency-chart svg {
+  display: block;
+  width: 100%;
+  height: 168px;
+}
+
+.latency-chart__empty {
+  padding: 28px 12px;
+  color: #6b7b80;
+  font-size: 12px;
+  text-align: center;
+}
+
+.latency-plot {
+  fill: #fbfcfc;
+  stroke: #d8e4df;
+  stroke-width: 1;
+}
+
+.latency-grid {
+  stroke: #edf2f0;
+  stroke-width: 1;
+}
+
+.latency-day {
+  stroke: #9eb0ad;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.latency-y,
+.latency-day-label {
+  fill: #6b7b80;
+  font-size: 9px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.latency-y {
+  text-anchor: end;
+}
+
+.latency-day-label {
+  text-anchor: middle;
+}
+
+.latency-line {
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.latency-line--click {
+  stroke: #1f7f68;
+}
+
+.latency-line--idle {
+  stroke: #d97706;
+  stroke-opacity: 0.9;
+}
+
+.latency-line--phrase {
+  stroke: #3b82f6;
+}
+
+.latency-dot--click {
+  fill: #1f7f68;
+}
+
+.latency-dot--phrase {
+  fill: #3b82f6;
 }
 
 .stats-toolbar select {

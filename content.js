@@ -60,8 +60,9 @@ function handlePhraseSelection(event) {
   }, 0);
 
   const requestId = ++activeRequest;
+  const clickedAt = Date.now();
   showPhraseTooltip(selected.text, selected.rect, 'Překládám větu…', 'loading');
-  chrome.runtime.sendMessage({ type: 'TRANSLATE_PHRASE', text: selected.text }, (response) => {
+  chrome.runtime.sendMessage({ type: 'TRANSLATE_PHRASE', text: selected.text, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
@@ -108,6 +109,7 @@ function handleClick(event) {
 }
 
 function lookupFromPoint(clientX, clientY, target, event) {
+  const clickedAt = Date.now();
   const selection = getWordSelection(clientX, clientY, target);
   if (!selection) {
     return;
@@ -118,7 +120,7 @@ function lookupFromPoint(clientX, clientY, target, event) {
   const requestId = ++activeRequest;
   showTooltip(selection.word, selection.rect, 'Překládám slovo…', 'loading', 0, null, []);
 
-  chrome.runtime.sendMessage({ type: 'LOOKUP_WORD', word: selection.word }, (response) => {
+  chrome.runtime.sendMessage({ type: 'LOOKUP_WORD', word: selection.word, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
@@ -136,6 +138,7 @@ function lookupFromPoint(clientX, clientY, target, event) {
       response.cardId,
       response.translations || [response.translation],
       response.viewCount || null,
+      response.alternativesSource || 'lingq',
     );
   });
 }
@@ -262,7 +265,7 @@ function isWordCharacter(character) {
   return /[\p{L}\p{M}\p{N}'’\-]/u.test(character);
 }
 
-function showTooltip(word, rect, translation, kind, status, cardId, translations, viewCount = null) {
+function showTooltip(word, rect, translation, kind, status, cardId, translations, viewCount = null, alternativesSource = 'lingq') {
   if (!tooltip) {
     tooltip = document.createElement('div');
     tooltip.id = TOOLTIP_ID;
@@ -274,7 +277,10 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
   tooltip.dataset.word = word;
   tooltip.dataset.translation = kind === 'loading' || kind === 'error' ? '' : translation;
   tooltip.dataset.cardId = cardId ? String(cardId) : '';
-  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button">Další překlady</button><div class="lingq-tooltip__alternative-list" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
+  const source = alternativesSource === 'chatgpt' ? 'chatgpt' : 'lingq';
+  tooltip.dataset.alternativesSource = source;
+  tooltip.dataset.alternativesLoaded = 'false';
+  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button"></button><div class="lingq-tooltip__alternative-list" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
   tooltip.querySelector('.lingq-tooltip__word').textContent = word;
   const translationElement = tooltip.querySelector('.lingq-tooltip__translation');
   translationElement.textContent = translation;
@@ -284,7 +290,7 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
     viewsElement.hidden = false;
     viewsElement.textContent = `Viděno ${seenCount}×`;
   }
-  if (cardId && kind !== 'loading' && kind !== 'error') {
+  if (kind !== 'loading' && kind !== 'error') {
     enableTranslationEditing(translationElement);
   }
   tooltip.querySelector('.lingq-tooltip__close').addEventListener('click', hideTooltip);
@@ -307,38 +313,119 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
 
   const alternativeButton = tooltip.querySelector('.lingq-tooltip__alternatives');
   const alternativeList = tooltip.querySelector('.lingq-tooltip__alternative-list');
-  const meaningLines = groupMeanings(translations, translation);
-  if (meaningLines.length === 0 || kind === 'loading' || kind === 'error') {
+  const canShowAlternatives = kind !== 'loading' && kind !== 'error';
+  if (!canShowAlternatives) {
     alternativeButton.hidden = true;
   } else {
+    alternativeButton.hidden = false;
+    alternativeButton.textContent = alternativesButtonLabel(source, 'show');
+    // API (LingQ / ChatGPT) se volá až po kliknutí — nic se nenačítá předem.
     alternativeButton.addEventListener('click', () => {
+      if (tooltip.dataset.alternativesLoaded !== 'true') {
+        loadAlternativeTranslations(word, translation, alternativeButton, alternativeList, translationElement, rect);
+        return;
+      }
       alternativeList.hidden = !alternativeList.hidden;
-      alternativeButton.textContent = alternativeList.hidden ? 'Další překlady' : 'Skrýt překlady';
+      alternativeButton.textContent = alternativesButtonLabel(
+        tooltip.dataset.alternativesSource,
+        alternativeList.hidden ? 'show' : 'hide',
+      );
       placeTooltip(rect);
-    });
-    meaningLines.forEach((line) => {
-      const item = document.createElement('div');
-      item.className = 'lingq-tooltip__alternative';
-      const text = document.createElement('span');
-      text.className = 'lingq-tooltip__alternative-text';
-      text.textContent = line;
-      const addButton = document.createElement('button');
-      addButton.type = 'button';
-      addButton.className = 'lingq-tooltip__add';
-      addButton.textContent = '+';
-      addButton.title = 'Přidat do překladu';
-      addButton.setAttribute('aria-label', 'Přidat do překladu');
-      addButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        addMeaningToTranslation(line, item, translationElement);
-      });
-      item.append(text, addButton);
-      alternativeList.appendChild(item);
     });
   }
 
   placeTooltip(rect);
+}
+
+function populateAlternativeList(alternativeList, meaningLines, translationElement) {
+  alternativeList.innerHTML = '';
+  if (meaningLines.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'lingq-tooltip__alternative lingq-tooltip__alternative--empty';
+    empty.textContent = 'Další překlady se nenašly.';
+    alternativeList.appendChild(empty);
+    return;
+  }
+  meaningLines.forEach((line) => {
+    const item = document.createElement('div');
+    item.className = 'lingq-tooltip__alternative';
+    const text = document.createElement('span');
+    text.className = 'lingq-tooltip__alternative-text';
+    text.textContent = line;
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'lingq-tooltip__add';
+    addButton.textContent = '+';
+    addButton.title = 'Přidat do překladu';
+    addButton.setAttribute('aria-label', 'Přidat do překladu');
+    addButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      addMeaningToTranslation(line, item, translationElement);
+    });
+    item.append(text, addButton);
+    alternativeList.appendChild(item);
+  });
+}
+
+function fillAlternativeList(alternativeList, meaningLines, translationElement, rect) {
+  populateAlternativeList(alternativeList, meaningLines, translationElement);
+  alternativeList.hidden = false;
+  placeTooltip(rect);
+}
+
+function alternativesButtonLabel(source, state = 'show') {
+  const api = source === 'chatgpt' ? 'ChatGPT' : 'LingQ';
+  if (state === 'loading') {
+    return 'Načítám překlady…';
+  }
+  if (state === 'hide') {
+    return 'Skrýt překlady';
+  }
+  return `Další překlady (${api})`;
+}
+
+function friendlyAlternativesError(message) {
+  const text = String(message || '');
+  if (/message channel closed/i.test(text) || /asynchronous response/i.test(text)) {
+    return 'ChatGPT neodpovědělo včas. Zkuste to znovu nebo zvolte rychlejší model.';
+  }
+  return text || 'Další překlady se nepodařilo načíst.';
+}
+
+function loadAlternativeTranslations(word, translation, alternativeButton, alternativeList, translationElement, rect) {
+  const source = tooltip?.dataset.alternativesSource === 'chatgpt' ? 'chatgpt' : 'lingq';
+  alternativeButton.disabled = true;
+  alternativeButton.textContent = alternativesButtonLabel(source, 'loading');
+  alternativeList.hidden = false;
+  alternativeList.innerHTML = '<div class="lingq-tooltip__alternative lingq-tooltip__alternative--empty">Načítám další překlady…</div>';
+  placeTooltip(rect);
+
+  chrome.runtime.sendMessage({
+    type: 'GET_ALTERNATIVES',
+    word,
+    currentTranslation: translation,
+  }, (response) => {
+    if (!tooltip || tooltip.dataset.word !== word) {
+      return;
+    }
+    alternativeButton.disabled = false;
+    if (chrome.runtime.lastError || !response?.ok) {
+      alternativeButton.textContent = alternativesButtonLabel(source, 'show');
+      alternativeList.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'lingq-tooltip__alternative lingq-tooltip__alternative--empty';
+      empty.textContent = friendlyAlternativesError(
+        response?.error || chrome.runtime.lastError?.message || 'Další překlady se nepodařilo načíst.',
+      );
+      alternativeList.appendChild(empty);
+      placeTooltip(rect);
+      return;
+    }
+    tooltip.dataset.alternativesLoaded = 'true';
+    alternativeButton.textContent = alternativesButtonLabel(source, 'hide');
+    fillAlternativeList(alternativeList, response.translations || [], translationElement, rect);
+  });
 }
 
 function groupMeanings(translations, current) {
@@ -390,10 +477,6 @@ function addMeaningToTranslation(line, item, translationElement) {
   const word = tooltip?.dataset.word || '';
   const current = (translationElement.textContent || '').replace(/\s+/g, ' ').trim();
   const merged = mergeMeaning(current, line);
-  if (!cardId) {
-    showTooltipMessage('LingQ nevrátil identifikátor karty.');
-    return;
-  }
   if (!merged || merged === current) {
     item.remove();
     return;
@@ -417,6 +500,9 @@ function addMeaningToTranslation(line, item, translationElement) {
       }
       showTooltipMessage(response?.error || 'Překlad se nepodařilo uložit.');
       return;
+    }
+    if (response.cardId) {
+      tooltip.dataset.cardId = String(response.cardId);
     }
     const stored = response.translation || merged;
     tooltip.dataset.translation = stored;
@@ -498,10 +584,6 @@ function saveTranslation(element) {
 
   const cardId = tooltip?.dataset.cardId || '';
   const word = tooltip?.dataset.word || '';
-  if (!cardId) {
-    showTooltipMessage('LingQ nevrátil identifikátor karty.');
-    return;
-  }
 
   pendingTranslation = next;
   const requestId = ++translationSaveRequest;
@@ -518,6 +600,9 @@ function saveTranslation(element) {
       return;
     }
 
+    if (response.cardId) {
+      tooltip.dataset.cardId = String(response.cardId);
+    }
     const stored = response.translation || next;
     tooltip.dataset.translation = stored;
     if (element.getAttribute('contenteditable') !== 'true') {
@@ -529,16 +614,14 @@ function saveTranslation(element) {
 
 function changeStatus(status) {
   const cardId = tooltip?.dataset.cardId || '';
-  if (!cardId) {
-    showTooltipMessage('LingQ nevrátil identifikátor karty.');
-    return;
-  }
+  const word = tooltip?.dataset.word || '';
+  const translation = tooltip?.dataset.translation || '';
 
   const buttons = [...tooltip.querySelectorAll('.lingq-level')];
   buttons.forEach((button) => { button.disabled = true; });
   showTooltipMessage('Ukládám úroveň…');
 
-  chrome.runtime.sendMessage({ type: 'UPDATE_STATUS', cardId, status, word: tooltip?.dataset.word || '' }, (response) => {
+  chrome.runtime.sendMessage({ type: 'UPDATE_STATUS', cardId, status, word, translation }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
       buttons.forEach((button) => { button.disabled = false; });
       showTooltipMessage(response?.error || 'Úroveň se nepodařilo uložit.');

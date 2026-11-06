@@ -30,7 +30,9 @@
 
       <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
         <button class="tab tab--active" type="button" role="tab" id="tab-words" aria-selected="true" aria-controls="panel-words" data-tab="words">Slovník</button>
+        <button class="tab" type="button" role="tab" id="tab-import" aria-selected="false" aria-controls="panel-import" data-tab="import">Import</button>
         <button class="tab" type="button" role="tab" id="tab-stats" aria-selected="false" aria-controls="panel-stats" data-tab="stats">Statistiky</button>
+        <button class="tab" type="button" role="tab" id="tab-latency" aria-selected="false" aria-controls="panel-latency" data-tab="latency">Odezva</button>
         <button class="tab" type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-tab="settings">Nastavení</button>
       </nav>
 
@@ -39,9 +41,41 @@
           <label for="api-key">LingQ API klíč</label>
           <div class="input-wrap">
             <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
-            <button type="button" id="toggle-key" aria-label="Zobrazit API klíč">Zobrazit</button>
+            <button type="button" id="toggle-key" aria-label="Zobrazit LingQ API klíč">Zobrazit</button>
           </div>
           <p class="help">API klíč získáte ve svém účtu LingQ v sekci API key.</p>
+
+          <label for="chatgpt-api-key">ChatGPT API klíč</label>
+          <div class="input-wrap">
+            <input id="chatgpt-api-key" type="password" placeholder="sk-…" autocomplete="off" />
+            <button type="button" id="toggle-chatgpt-key" aria-label="Zobrazit ChatGPT API klíč">Zobrazit</button>
+          </div>
+          <p class="help">API klíč získáte na platform.openai.com v sekci API keys.</p>
+          <p class="help" id="chatgpt-key-status" role="status"></p>
+
+          <label for="new-word-source">Nová slovíčka překládat přes</label>
+          <select id="new-word-source">
+            <option value="lingq">LingQ API</option>
+            <option value="chatgpt" id="new-word-source-chatgpt">ChatGPT</option>
+          </select>
+          <p class="help" id="new-word-source-help">Slovíčka, která ještě nejsou v LingQ. Po překladu se karta v LingQ stejně založí. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
+
+          <label for="alternatives-source">Další překlady přes</label>
+          <select id="alternatives-source">
+            <option value="lingq">LingQ API</option>
+            <option value="chatgpt" id="alternatives-source-chatgpt">ChatGPT</option>
+          </select>
+          <p class="help" id="alternatives-source-help">Zdroj sekce „Další překlady“ ve vyskakovací bublině. ChatGPT se volá až po kliknutí na tlačítko. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
+
+          <label for="chatgpt-model">Model ChatGPT</label>
+          <select id="chatgpt-model" disabled>
+            <option value="gpt-5-nano">gpt-5-nano — $0.05 / $0.40 za 1M tokenů</option>
+            <option value="gpt-4o-mini">gpt-4o-mini — $0.15 / $0.60 za 1M tokenů</option>
+            <option value="gpt-5.4-nano">gpt-5.4-nano — $0.20 / $1.25 za 1M tokenů</option>
+            <option value="gpt-5-mini">gpt-5-mini — $0.25 / $2.00 za 1M tokenů</option>
+            <option value="gpt-4.1-mini">gpt-4.1-mini — $0.40 / $1.60 za 1M tokenů</option>
+          </select>
+          <p class="help" id="chatgpt-model-help">Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI. Výchozí je gpt-5-nano.</p>
 
           <div class="field-grid">
             <div>
@@ -81,6 +115,19 @@
           </select>
           <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
 
+          <p class="field-label">Sledovat odezvu po nečinnosti (sekundy)</p>
+          <div class="field-grid field-grid--idle">
+            <div>
+              <label for="latency-idle-min">Od</label>
+              <input id="latency-idle-min" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+            </div>
+            <div>
+              <label for="latency-idle-max">Do</label>
+              <input id="latency-idle-max" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+            </div>
+          </div>
+          <p class="help">Po nečinnosti se v tomto rozmezí náhodně zvolí čas a odešle kontrolní dotaz. Po každém odeslání se vybere nový náhodný čas. Výchozí je 60–80 sekund. Nové karty se při kontrole nezakládají.</p>
+
           <label for="supabase-url">Supabase URL</label>
           <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
           <p class="help">Lokální databáze slovíček. LingQ napojení se nemění.</p>
@@ -97,16 +144,53 @@
         <div class="words-toolbar">
           <label class="sr-only" for="word-search">Hledat slovíčko</label>
           <input id="word-search" type="search" placeholder="Hledat slovíčko…" autocomplete="off" />
-          <label class="sr-only" for="word-sort">Řazení</label>
-          <select id="word-sort">
-            <option value="alpha-asc">Abeceda A–Z</option>
-            <option value="alpha-desc">Abeceda Z–A</option>
-            <option value="views-desc">Nejvíce kliknutí</option>
-            <option value="views-asc">Nejméně kliknutí</option>
-          </select>
+          <div class="words-toolbar__row">
+            <label class="sr-only" for="word-status-filter">Znalost</label>
+            <select id="word-status-filter">
+              <option value="all">Všechny znalosti</option>
+              <option value="1">Znalost 1</option>
+              <option value="2">Znalost 2</option>
+              <option value="3">Znalost 3</option>
+              <option value="4">Znalost 4</option>
+              <option value="5">Znalost K</option>
+            </select>
+            <label class="sr-only" for="word-sort">Řazení</label>
+            <select id="word-sort">
+              <option value="alpha-asc">Abeceda A–Z</option>
+              <option value="alpha-desc">Abeceda Z–A</option>
+              <option value="views-desc">Nejvíce kliknutí</option>
+              <option value="views-asc">Nejméně kliknutí</option>
+            </select>
+          </div>
         </div>
         <p class="words-meta" id="words-meta">Načítám slovíčka…</p>
         <div class="words-list" id="words-list" role="list"></div>
+      </section>
+
+      <section class="tab-panel" id="panel-import" role="tabpanel" aria-labelledby="tab-import" hidden>
+        <div class="words-import">
+          <div class="import-progress" id="import-progress" hidden>
+            <div class="import-progress__totals" id="import-progress-totals">
+              <div>Vocabulary karty: <strong id="import-cards-numbers">0 / 0</strong></div>
+              <div>Known words: <strong id="import-known-numbers">0 / 0</strong></div>
+            </div>
+            <div class="import-progress__meta">
+              <span id="import-progress-phase">Karty</span>
+              <span id="import-progress-numbers">0 / 0</span>
+            </div>
+            <div class="import-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="import-progress-bar">
+              <div class="import-progress__fill" id="import-progress-fill"></div>
+            </div>
+            <div class="import-progress__scale">
+              <span>0</span>
+              <span id="import-progress-total-label">0</span>
+            </div>
+          </div>
+          <button type="button" class="import-button" id="sync-known-words">Importovat dalších 5 000</button>
+          <button type="button" class="import-button import-button--ghost" id="reset-lingq-import">Resetovat progress importu</button>
+          <p class="help">Importuje Vocabulary karty i known words (obě množiny). Nejdřív karty (s překladem z hints), potom known words — i ta bez překladu se uloží a překlad zůstane prázdný. Kde už překlad z karty je, nepřepíše se. Dávky max 5 000, mezi nimi 1 h pauza. Jednou spusťte <code>supabase/import_known_words.sql</code>.</p>
+          <p class="words-import-status" id="import-known-status" role="status"></p>
+        </div>
       </section>
 
       <section class="tab-panel" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
@@ -134,6 +218,24 @@
           </div>
         </div>
         <table class="stats-table" id="stats-table">
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="tab-panel" id="panel-latency" role="tabpanel" aria-labelledby="tab-latency" hidden>
+        <p class="stats-meta" id="latency-meta">Načítám odezvu…</p>
+        <section class="latency-chart-wrap" aria-label="Týdenní odezva LingQ">
+          <div class="latency-chart-head">
+            <h2 class="latency-chart-title">Odezva LingQ · posledních 7 dní</h2>
+            <div class="latency-chart-legend">
+              <span class="latency-legend latency-legend--click">kliknutí</span>
+              <span class="latency-legend latency-legend--idle">nečinnost</span>
+              <span class="latency-legend latency-legend--phrase">věta</span>
+            </div>
+          </div>
+          <div class="latency-chart" id="latency-chart"></div>
+        </section>
+        <table class="stats-table" id="latency-table">
           <tbody></tbody>
         </table>
       </section>

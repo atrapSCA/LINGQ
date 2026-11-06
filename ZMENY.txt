@@ -75,3 +75,136 @@ Verze 0.2.0
 - Období: 30 dní, tento měsíc, 1/4 roku, půl roku, rok.
 - Tabulka: kliknutí, aktivní dny, průměr, nejaktivnější den, přidáno/upraveno slovíček, úrovně 1–K.
 - Logování kliknutí do usage_events; statistiky se zobrazují jen v záložce Statistiky.
+
+Verze 0.2.1
+6. 11. 2026 15:43
+- Měří se doba od kliknutí na slovo po odpověď LingQ a ukládá se do tabulky lingq_latency.
+- Ve Statistikách je průměrná odezva kliknutí, kontrolních dotazů a poslední měření.
+- Po nastavené nečinnosti se každou minutu pošle kontrolní dotaz na LingQ, bez založení nové karty.
+- V nastavení je interval nečinnosti, po kterém se sledování zapne. Výchozí je 60 sekund.
+
+Verze 0.2.2
+6. 11. 2026 15:53
+- Tabulka lingq_latency_kind říká, jestli měření vzniklo klasickým kliknutím, nebo automaticky při nečinnosti.
+- Každé měření v lingq_latency má na tento druh odkaz ve sloupci kind.
+
+Verze 0.2.3
+6. 11. 2026 16:11
+- Ve Statistikách je týdenní spojnicový graf odezvy LingQ.
+- Zelená čára = kliknutí na slovíčko, oranžová = automatická kontrola při nečinnosti.
+- Osy se přizpůsobí naměřené latenci; půlnoci jsou oddělené svislou čarou.
+
+Verze 0.2.4
+6. 11. 2026 16:15
+- Statistika odezvy LingQ je v samostatné záložce Odezva.
+- Záložka Statistiky zůstává jen pro kliknutí a slovník.
+
+Verze 0.2.5
+6. 11. 2026 16:19
+- U měření odezvy slovíčka se ukládá úroveň znalosti (nové / 1–4 / K).
+- Ve Statistikách je počet překladů celých vět.
+- Odezva překladu věty se měří a ukládá zvlášť; v záložce Odezva je třetí křivka a průměry podle úrovně.
+
+Verze 0.2.6
+6. 11. 2026 16:22
+- Kontrolní dotaz při nečinnosti bere náhodné anglické slovíčko z tabulky words v databázi.
+
+Verze 0.2.7
+6. 11. 2026 16:30
+- Interval nečinnosti pro kontrolní odezvu je rozmezí Od–Do (výchozí 60–80 s).
+- Po každém automatickém odeslání se vygeneruje nový náhodný čas v tomto rozmezí.
+
+Verze 0.2.8
+6. 11. 2026 16:33
+- V nastavení lze zadat ChatGPT API klíč (OpenAI).
+
+Verze 0.2.9
+6. 11. 2026 16:35
+- V nastavení lze zvolit zdroj „Další překlady“: LingQ API nebo ChatGPT.
+- Při ChatGPT se další překlady načtou až po kliknutí na tlačítko v bublině.
+
+Verze 0.2.10
+6. 11. 2026 16:39
+- Volba ChatGPT u „Další překlady“ je dostupná jen s vyplněným a platným ChatGPT API klíčem.
+- Po uložení nebo změně klíče se klíč ověří proti OpenAI API.
+
+Verze 0.2.11
+6. 11. 2026 16:42
+- Výchozí model pro ChatGPT překlady je gpt-5-nano.
+- V nastavení lze zvolit další levné modely; u každého je cena za 1M tokenů (vstup / výstup).
+- Výběr modelu je dostupný jen s platným ChatGPT API klíčem.
+
+Verze 0.2.12
+6. 11. 2026 16:47
+- U tlačítka „Další překlady“ je v závorce zdroj API (LingQ / ChatGPT).
+- LingQ i ChatGPT API pro další překlady se volají až po kliknutí na tlačítko, ne při otevření bubliny.
+
+Verze 0.2.13
+6. 11. 2026 16:50
+- V nastavení lze zvolit, jestli se nová slovíčka (ještě nejsou v LingQ) překládají přes LingQ API, nebo ChatGPT.
+- Volba ChatGPT je dostupná jen s platným API klíčem; při výpadku ChatGPT se použije LingQ.
+- Po překladu se karta v LingQ založí jako dřív.
+
+Verze 0.2.14
+6. 11. 2026 16:53
+- ChatGPT překlady jsou rychlejší: bez opakovaného ověřování klíče a u GPT-5 s reasoning_effort=minimal.
+- Přidán timeout 40 s a srozumitelná hláška místo chyby „message channel closed“.
+
+Verze 0.2.15
+6. 11. 2026 17:10
+- Ve slovníku: tlačítko stáhne známá slovíčka z LingQ do JSON souboru (formát lingq-click-translator-known-words-v1).
+- Druhé tlačítko nahraje tento soubor do Supabase (status K, při konfliktu GREATEST).
+- SQL funkce import_known_words je v supabase/import_known_words.sql (každý uživatel ve svém projektu).
+
+Verze 0.2.16
+6. 11. 2026 17:15
+- Import známých slovíček je opět přímý: LingQ → Supabase jedním tlačítkem.
+- V tabulce words je sloupec import_note; nově importovaná slovíčka mají „Hromadný import z LingQ“.
+- Při konfliktu se status povýší přes GREATEST; u existujících řádků se import_note nemění.
+
+Verze 0.2.17
+6. 11. 2026 17:20
+- Import stahuje všechna slovíčka z LingQ (úrovně 1–4 a K), nejen known words.
+- Při konfliktu LingQ vs DB se nastaví vyšší status (K = 5 je nejvyšší).
+- SQL funkce přejmenována na import_lingq_words (spusťte znovu supabase/import_known_words.sql).
+
+Verze 0.2.18
+6. 11. 2026 17:28
+- U „Další překlady“ (včetně ChatGPT) funguje „+“ i u slovíček bez LingQ karty (typicky K).
+- Chybí-li cardId, doplněk kartu v LingQ založí a překlad uloží.
+
+Verze 0.2.19
+6. 11. 2026 17:35
+- Import z LingQ ukládá i překlady z hints u Vocabulary karet.
+- U už existujících slovíček v DB se prázdný překlad při opětovném importu doplní.
+- Pure known words bez karty překlad z API nemají — u těch zůstane prázdný.
+
+Verze 0.2.20
+6. 11. 2026 17:48
+- V tabulce words jsou sloupce importance a popularity.
+- Import mapuje term → word, hints.text → translation, card.importance, hint.popularity.
+
+Verze 0.2.21
+6. 11. 2026 17:59
+- Import z LingQ běží po dávkách max 5 000 slov s progress barem 0–celkem.
+- Mezi dávkami je 1 hodina cooldown (ochrana proti blokaci API); tlačítko ukáže odpočet.
+- Nejdřív Vocabulary karty, potom known words; progress se pamatuje lokálně.
+
+Verze 0.2.22
+6. 11. 2026 18:02
+- U importu jsou zvlášť vidět počty Vocabulary karet i known words (nejsou to stejná čísla).
+
+Verze 0.2.23
+6. 11. 2026 18:08
+- Sekce importu z LingQ je na samostatné záložce Import; ve Slovníku zůstává jen seznam slovíček.
+
+Verze 0.2.24
+6. 11. 2026 18:12
+- Ve Slovníku jde filtrovat podle znalosti (1–4, K).
+- U každého slovíčka je koš: smaže kartu v LingQ i záznam v databázi.
+
+Verze 0.2.25
+6. 11. 2026 18:40
+- Stabilní release: Import z LingQ do DB, filtr znalosti ve Slovníku, mazání slovíčka z LingQ i DB.
+- Import Vocabulary karet i known words po dávkách (max 5 000) s cooldownem; záložka Import oddělená od Slovníku.
+- Mazání ze Slovníku nejdřív ověří smazání v LingQ (v3/v2, u known words create+delete); při chybě DB zůstane.

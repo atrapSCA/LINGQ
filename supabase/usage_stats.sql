@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.usage_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  event_type text NOT NULL CHECK (event_type IN ('view', 'create', 'edit')),
+  event_type text NOT NULL CHECK (event_type IN ('view', 'create', 'edit', 'phrase')),
   word text,
   language text NOT NULL DEFAULT 'en',
   status integer,
@@ -45,6 +45,11 @@ BEGIN
       WHERE e.language = lang AND e.event_type = 'view'
         AND e.created_at >= range_from AND e.created_at < range_to
     ), 0),
+    'phrases', COALESCE((
+      SELECT count(*)::int FROM public.usage_events e
+      WHERE e.language = lang AND e.event_type = 'phrase'
+        AND e.created_at >= range_from AND e.created_at < range_to
+    ), 0),
     'added', COALESCE((
       SELECT count(*)::int FROM public.words w
       WHERE w.language = lang
@@ -59,7 +64,7 @@ BEGIN
     'active_days', COALESCE((
       SELECT count(DISTINCT ((e.created_at AT TIME ZONE 'Europe/Prague')::date))::int
       FROM public.usage_events e
-      WHERE e.language = lang AND e.event_type = 'view'
+      WHERE e.language = lang AND e.event_type IN ('view', 'phrase')
         AND e.created_at >= range_from AND e.created_at < range_to
     ), 0),
     'days', COALESCE((
