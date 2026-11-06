@@ -1,4 +1,22 @@
-importScripts('role.js');
+importScripts('role.js', 'i18n.js');
+
+async function ensureBgLocale() {
+  if (typeof LingqI18n === 'undefined') {
+    return;
+  }
+  const stored = await chrome.storage.sync.get({ uiLocale: LingqI18n.DEFAULT });
+  await LingqI18n.setLocale(stored.uiLocale || LingqI18n.DEFAULT, { apply: false });
+}
+
+function bt(key, vars) {
+  return typeof LingqI18n !== 'undefined' ? LingqI18n.t(key, vars) : key;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.uiLocale && typeof LingqI18n !== 'undefined') {
+    LingqI18n.setLocale(changes.uiLocale.newValue || LingqI18n.DEFAULT, { apply: false }).catch(() => {});
+  }
+});
 
 const DEFAULTS = {
   apiKey: 'd59c2650c569e8f6aba883b9d4fb48826d1b1d25',
@@ -6,6 +24,7 @@ const DEFAULTS = {
   targetLanguage: 'cs',
   enabled: true,
   theme: 'light',
+  uiLocale: 'en',
   clickCount: 1,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,
@@ -52,24 +71,25 @@ function iconPaths(enabled) {
   };
 }
 
-function applyActionIcon(enabled) {
+async function applyActionIcon(enabled) {
   const isEnabled = enabled !== false;
   chrome.action.setIcon({ path: iconPaths(isEnabled) });
+  await ensureBgLocale();
   chrome.action.setTitle({
-    title: isEnabled ? 'LingQ Click Translator — zapnuto' : 'LingQ Click Translator — vypnuto',
+    title: isEnabled ? bt('action.titleOn') : bt('action.titleOff'),
   });
 }
 
 function syncActionIcon() {
   chrome.storage.sync.get(DEFAULTS, (settings) => {
-    applyActionIcon(settings.enabled);
+    applyActionIcon(settings.enabled).catch(() => {});
   });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.sync.get(DEFAULTS, (settings) => {
     chrome.storage.sync.set(settings);
-    applyActionIcon(settings.enabled);
+    applyActionIcon(settings.enabled).catch(() => {});
     ensureLatencyWatch();
   });
 });
@@ -83,7 +103,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
   if (changes.enabled) {
-    applyActionIcon(changes.enabled.newValue);
+    applyActionIcon(changes.enabled.newValue).catch(() => {});
   }
   if (changes.supabaseUrl || changes.supabaseKey || changes.supabaseEnabled) {
     invalidateSupabaseReadyCache();
@@ -224,7 +244,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'VALIDATE_CHATGPT_KEY') {
     validateChatgptApiKey(message.apiKey)
       .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'ChatGPT API klíč se nepodařilo ověřit.' }));
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('err.chatgptValidate') }));
     return true;
   }
 
@@ -270,7 +290,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ok: false,
         ready: false,
         configured: false,
-        error: error instanceof Error ? error.message : 'Stav databáze se nepodařilo zjistit.',
+        error: error instanceof Error ? error.message : bt('err.dbStatus'),
       }));
     return true;
   }
@@ -279,20 +299,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     requireSupabaseReady()
       .then(() => listSupabaseWords())
       .then((words) => sendResponse({ ok: true, words }))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Slovník se nepodařilo načíst.' }));
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
     return true;
   }
 
   if (message.type === 'CHECK_SUPABASE_SCHEMA') {
     checkSupabaseSchema(message.settings || null)
       .then((result) => {
-        rememberSupabaseReady(result.ready === true, message.settings || null, result.message);
+        rememberSupabaseReady(
+          result.ready === true,
+          message.settings || null,
+          result.message,
+          result.messageKey,
+          result.messageParams,
+        );
         ensureLatencyWatch({ reshuffle: true });
         return result;
       })
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => {
-        const messageText = error instanceof Error ? error.message : 'Kontrola databáze se nezdařila.';
+        const messageText = error instanceof Error ? error.message : bt('settings.dbCheckFailed');
         rememberSupabaseReady(false, message.settings || null, messageText);
         ensureLatencyWatch({ reshuffle: true });
         sendResponse({
@@ -307,13 +333,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PREPARE_SUPABASE_INSTALL') {
     prepareSupabaseInstall(message.settings || null)
       .then((result) => {
-        rememberSupabaseReady(result.ready === true, message.settings || null, result.message);
+        rememberSupabaseReady(
+          result.ready === true,
+          message.settings || null,
+          result.message,
+          result.messageKey,
+          result.messageParams,
+        );
         return result;
       })
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({
         ok: false,
-        error: error instanceof Error ? error.message : 'Příprava instalace databáze se nezdařila.',
+        error: error instanceof Error ? error.message : bt('err.dbInstallPrepare'),
       }));
     return true;
   }
@@ -325,7 +357,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({
         ok: false,
-        error: error instanceof Error ? error.message : 'Slovíčko se nepodařilo odstranit.',
+        error: error instanceof Error ? error.message : bt('words.deleteFailed'),
       }));
     return true;
   }
@@ -337,7 +369,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => reply(sendResponse, { ok: true, ...result }))
       .catch((error) => reply(sendResponse, {
         ok: false,
-        error: error instanceof Error ? error.message : 'Import slovíček z LingQ se nezdařil.',
+        error: error instanceof Error ? error.message : bt('import.err.failed'),
       }));
     return true;
   }
@@ -352,7 +384,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         reply(sendResponse, {
           ok: false,
           progress: fallback,
-          error: error instanceof Error ? error.message : 'Stav importu se nepodařilo obnovit.',
+          error: error instanceof Error ? error.message : bt('import.err.statusFailed'),
         });
       });
     return true;
@@ -369,7 +401,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((error) => reply(sendResponse, {
         ok: false,
-        error: error instanceof Error ? error.message : 'Progress se nepodařilo resetovat.',
+        error: error instanceof Error ? error.message : bt('import.err.resetFailed'),
       }));
     return true;
   }
@@ -378,7 +410,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     requireSupabaseReady()
       .then(() => getUsageStats(message.period))
       .then((stats) => sendResponse({ ok: true, stats }))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Statistiky se nepodařilo načíst.' }));
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('err.statsLoad') }));
     return true;
   }
 
@@ -386,7 +418,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     requireSupabaseReady()
       .then(() => getLatencyStats())
       .then((latency) => sendResponse({ ok: true, latency }))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Odezvu se nepodařilo načíst.' }));
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('err.latencyLoad') }));
     return true;
   }
 
@@ -402,13 +434,13 @@ async function lookupWord(word, options = {}) {
 
   if (!isLingqEnabled(settings)) {
     if (probe) {
-      throw new Error('Idle kontrola LingQ je vypnutá (LingQ je vypnuté).');
+      throw new Error(bt('err.idleOff'));
     }
     return lookupWordOffline(word, settings);
   }
 
   if (!settings.apiKey) {
-    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
+    throw new Error(bt('err.needLingqKey'));
   }
 
   const cleanWord = normalizeWord(word);
@@ -433,7 +465,7 @@ async function lookupWord(word, options = {}) {
     rememberKnownWord(cleanWord, settings);
     result = await attachMeanings({
       word: cleanWord,
-      translation: translations[0] || 'Překlad není k dispozici.',
+      translation: translations[0] || bt('err.noTranslation'),
       translations,
       status: 5,
       cardId,
@@ -447,7 +479,7 @@ async function lookupWord(word, options = {}) {
     const translations = extractTranslations(hint, settings.targetLanguage);
     result = {
       word: cleanWord,
-      translation: translations[0] || 'Překlad nebyl nalezen.',
+      translation: translations[0] || bt('err.translationNotFound'),
       translations,
       status: 0,
       cardId: null,
@@ -456,7 +488,7 @@ async function lookupWord(word, options = {}) {
     };
   } else {
     const translations = await translateNewWord(cleanWord, settings);
-    const translation = translations[0] || 'Překlad nebyl nalezen.';
+    const translation = translations[0] || bt('err.translationNotFound');
     const createdCard = await createCard(cleanWord, translation, settings);
 
     result = await attachMeanings({
@@ -522,16 +554,16 @@ function resolveNewWordTranslationSource(settings) {
 
 async function lookupWordOffline(word, settings) {
   if (!canUseOfflineMode(settings)) {
-    throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+    throw new Error(bt('err.needOfflineStack'));
   }
   const gate = await getSupabaseGate();
   if (!gate.ready) {
-    throw new Error(gate.message || SUPABASE_DB_REQUIRED_MESSAGE);
+    throw new Error(gate.message || supabaseDbRequiredMessage());
   }
 
   const cleanWord = normalizeWord(word);
   if (!cleanWord) {
-    throw new Error('Chybí slovo k překladu.');
+    throw new Error(bt('err.missingWord'));
   }
 
   const existing = await fetchSupabaseWordRow(cleanWord, settings);
@@ -544,7 +576,7 @@ async function lookupWordOffline(word, settings) {
       needsLingqSync: true,
     }, settings);
     const row = touched || existing;
-    const translation = String(row.translation || existing.translation || '').trim() || 'Překlad není k dispozici.';
+    const translation = String(row.translation || existing.translation || '').trim() || bt('err.noTranslation');
     const status = Number(row.status) || Number(existing.status) || 1;
     return {
       word: cleanWord,
@@ -560,7 +592,7 @@ async function lookupWordOffline(word, settings) {
   }
 
   const translations = await fetchChatgptPrimaryTranslations(cleanWord, settings);
-  const translation = translations[0] || 'Překlad nebyl nalezen.';
+  const translation = translations[0] || bt('err.translationNotFound');
   const row = await syncSupabaseWord('touch_word', {
     word: cleanWord,
     translation,
@@ -613,7 +645,7 @@ async function fetchWordsNeedingLingqSync(settings) {
     `/rest/v1/words?select=word,translation,status,lingq_card_id&needs_lingq_sync=eq.true&language=eq.${language}&order=updated_at.asc&limit=500`,
   );
   if (!response.ok || !Array.isArray(json)) {
-    throw new Error(`Nepodařilo se načíst slovíčka ke synchronizaci (${response.status}).`);
+    throw new Error(bt('err.syncLoadWords', { status: response.status }));
   }
   return json;
 }
@@ -630,6 +662,7 @@ async function syncDbToLingq() {
   if (lingqSyncState.running) {
     return lingqSyncState;
   }
+  await ensureBgLocale();
   const settings = await chrome.storage.sync.get(DEFAULTS);
   if (!isLingqEnabled(settings)) {
     return lingqSyncState;
@@ -640,7 +673,7 @@ async function syncDbToLingq() {
       done: 0,
       total: 0,
       errors: 0,
-      message: 'LingQ je zapnuté, ale chybí API klíč — synchronizace přeskočena.',
+      message: bt('sync.skipNoKey'),
     };
     return lingqSyncState;
   }
@@ -653,7 +686,7 @@ async function syncDbToLingq() {
     done: 0,
     total: 0,
     errors: 0,
-    message: 'Synchronizuji databázi do LingQ…',
+    message: bt('sync.running'),
   };
 
   try {
@@ -665,7 +698,7 @@ async function syncDbToLingq() {
         done: 0,
         total: 0,
         errors: 0,
-        message: 'Není co synchronizovat do LingQ.',
+        message: bt('sync.nothing'),
       };
       return lingqSyncState;
     }
@@ -697,14 +730,29 @@ async function syncDbToLingq() {
       } catch {
         lingqSyncState.errors += 1;
       }
-      lingqSyncState.message = `Synchronizace do LingQ: ${lingqSyncState.done}/${lingqSyncState.total}`
-        + (lingqSyncState.errors ? ` · chyby ${lingqSyncState.errors}` : '');
+      lingqSyncState.message = lingqSyncState.errors
+        ? bt('sync.progressErrors', {
+          done: lingqSyncState.done,
+          total: lingqSyncState.total,
+          errors: lingqSyncState.errors,
+        })
+        : bt('sync.progress', {
+          done: lingqSyncState.done,
+          total: lingqSyncState.total,
+        });
     }
 
     lingqSyncState.running = false;
     lingqSyncState.message = lingqSyncState.errors
-      ? `Synchronizace hotová: ${lingqSyncState.done}/${lingqSyncState.total}, chyby ${lingqSyncState.errors}.`
-      : `Synchronizace hotová: ${lingqSyncState.done}/${lingqSyncState.total}.`;
+      ? bt('sync.doneErrors', {
+        done: lingqSyncState.done,
+        total: lingqSyncState.total,
+        errors: lingqSyncState.errors,
+      })
+      : bt('sync.done', {
+        done: lingqSyncState.done,
+        total: lingqSyncState.total,
+      });
   } catch (error) {
     lingqSyncState.running = false;
     lingqSyncState.message = getErrorMessage(error);
@@ -737,7 +785,7 @@ async function getAlternativeTranslations(word, currentTranslation) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const cleanWord = normalizeWord(word);
   if (!cleanWord) {
-    throw new Error('Chybí slovo pro další překlady.');
+    throw new Error(bt('err.missingWordAlts'));
   }
 
   if (resolveAlternativesSource(settings) === 'chatgpt') {
@@ -754,7 +802,7 @@ async function getAlternativeTranslations(word, currentTranslation) {
 async function validateChatgptApiKey(apiKey) {
   const key = String(apiKey || '').trim();
   if (!key) {
-    throw new Error('ChatGPT API klíč není vyplněný.');
+    throw new Error(bt('err.chatgptNoKey'));
   }
   const response = await fetch('https://api.openai.com/v1/models', {
     method: 'GET',
@@ -765,9 +813,9 @@ async function validateChatgptApiKey(apiKey) {
   });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error('ChatGPT API klíč není platný nebo nemá oprávnění.');
+      throw new Error(bt('err.chatgptInvalid'));
     }
-    throw new Error(`ChatGPT API odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.chatgptHttp', { status: response.status }));
   }
   return true;
 }
@@ -785,7 +833,7 @@ function reply(sendResponse, payload) {
 async function ensureChatgptApiReady(settings) {
   const apiKey = String(settings.chatgptApiKey || '').trim();
   if (!apiKey) {
-    throw new Error('Nejdříve zadejte ChatGPT API klíč v nastavení doplňku.');
+    throw new Error(bt('err.chatgptNeedKeySettings'));
   }
   // Klíč se ověřuje v nastavení; při běžném překladu netahat znovu /v1/models.
   if (settings.chatgptApiKeyValid === true) {
@@ -812,7 +860,7 @@ async function fetchWithTimeout(url, options, timeoutMs = CHATGPT_TIMEOUT_MS) {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new Error('ChatGPT neodpovědělo včas. Zkuste to znovu nebo zvolte rychlejší model.');
+      throw new Error(bt('err.chatgptTimeout'));
     }
     throw error;
   } finally {
@@ -852,9 +900,9 @@ async function callChatgptJson(settings, messages) {
         alternativesSource: 'lingq',
         newWordTranslationSource: 'lingq',
       });
-      throw new Error('ChatGPT API klíč není platný nebo nemá oprávnění.');
+      throw new Error(bt('err.chatgptInvalid'));
     }
-    throw new Error(`ChatGPT API odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.chatgptHttp', { status: response.status }));
   }
 
   const payload = await response.json();
@@ -863,7 +911,7 @@ async function callChatgptJson(settings, messages) {
   try {
     parsed = JSON.parse(content);
   } catch {
-    throw new Error('ChatGPT nevrátilo použitelný JSON.');
+    throw new Error(bt('err.chatgptBadJson'));
   }
   return parsed;
 }
@@ -899,7 +947,7 @@ async function fetchChatgptPrimaryTranslations(word, settings) {
   ]);
   const translations = parseChatgptTranslationList(parsed);
   if (translations.length === 0) {
-    throw new Error('ChatGPT nevrátilo použitelný překlad.');
+    throw new Error(bt('err.chatgptBadTranslation'));
   }
   return translations;
 }
@@ -925,7 +973,7 @@ async function fetchChatgptAlternatives(word, currentTranslation, settings) {
   ]);
   const translations = parseChatgptTranslationList(parsed);
   if (translations.length === 0) {
-    throw new Error('ChatGPT nevrátilo použitelný seznam překladů.');
+    throw new Error(bt('err.chatgptBadList'));
   }
   return groupAlternativeLines(translations, currentTranslation);
 }
@@ -977,7 +1025,7 @@ function cardResult(word, card, settings) {
   const translations = extractTranslations(card.hints, settings.targetLanguage);
   return {
     word,
-    translation: translations[0] || 'Překlad není k dispozici.',
+    translation: translations[0] || bt('err.noTranslation'),
     translations,
     status: normalizeStatus(card.status, card.extended_status),
     cardId: card.pk ?? card.id,
@@ -1007,7 +1055,7 @@ async function ensureCardId(cardId, word, translation, settings) {
   }
   const cleanWord = normalizeWord(word);
   if (!cleanWord) {
-    throw new Error('Chybí slovo pro zalo karty v LingQ.');
+    throw new Error(bt('err.missingWordCard'));
   }
   const existing = await findCard(cleanWord, settings);
   const existingId = existing?.pk ?? existing?.id ?? null;
@@ -1017,7 +1065,7 @@ async function ensureCardId(cardId, word, translation, settings) {
   const created = await createCard(cleanWord, translation || cleanWord, settings);
   const createdId = created?.pk ?? created?.id ?? null;
   if (!createdId) {
-    throw new Error('LingQ nevrátil identifikátor karty.');
+    throw new Error(bt('err.lingqNoCardId'));
   }
   // Known words často nemají kartu — po zalo zachovej K.
   if (await isKnownWord(cleanWord, settings)) {
@@ -1039,7 +1087,7 @@ async function updateStatus(cardId, status, word, translation = '') {
   const { apiStatus, body } = toApiStatus(status);
   if (!isLingqEnabled(settings)) {
     if (!canUseOfflineMode(settings)) {
-      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+      throw new Error(bt('err.needOfflineStack'));
     }
     const uiStatus = Number(status);
     await syncSupabaseWord('update_word_fields', {
@@ -1055,7 +1103,7 @@ async function updateStatus(cardId, status, word, translation = '') {
     };
   }
   if (!settings.apiKey) {
-    throw new Error('Tuto kartu nelze aktualizovat.');
+    throw new Error(bt('err.lingqCardUpdate'));
   }
   const resolvedCardId = await ensureCardId(cardId, word, translation, settings);
   const url = `${getApiBase(settings)}/cards/${encodeURIComponent(resolvedCardId)}/`;
@@ -1087,11 +1135,11 @@ async function updateTranslation(cardId, word, translation) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const text = String(translation || '').replace(/\s+/g, ' ').trim();
   if (!text) {
-    throw new Error('Překlad nemůže být prázdný.');
+    throw new Error(bt('err.lingqEmptyTranslation'));
   }
   if (!isLingqEnabled(settings)) {
     if (!canUseOfflineMode(settings)) {
-      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+      throw new Error(bt('err.needOfflineStack'));
     }
     await syncSupabaseWord('update_word_fields', {
       word,
@@ -1102,7 +1150,7 @@ async function updateTranslation(cardId, word, translation) {
     return { translation: text, cardId: cardId || null };
   }
   if (!settings.apiKey) {
-    throw new Error('Tuto kartu nelze aktualizovat.');
+    throw new Error(bt('err.lingqCardUpdate'));
   }
 
   const resolvedCardId = await ensureCardId(cardId, word, text, settings);
@@ -1169,7 +1217,7 @@ async function createHint(word, text, settings) {
 function toApiStatus(status) {
   const uiStatus = Number(status);
   if (!Number.isInteger(uiStatus) || uiStatus < 1 || uiStatus > 5) {
-    throw new Error('Neplatná úroveň znalosti.');
+    throw new Error(bt('err.lingqBadStatus'));
   }
   const apiStatus = uiStatus === 5 ? 3 : uiStatus - 1;
   const body = uiStatus === 5
@@ -1189,22 +1237,22 @@ async function translatePhrase(text) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) {
-    throw new Error('Vyberte větu.');
+    throw new Error(bt('err.selectPhrase'));
   }
 
   if (wantsChatgptPhraseTranslation(settings)) {
     if (!isLingqEnabled(settings) && !canUseOfflineMode(settings)) {
-      throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+      throw new Error(bt('err.needOfflineStack'));
     }
     if (!settings.chatgptEnabled || !String(settings.chatgptApiKey || '').trim()) {
-      throw new Error('Pro překlad vět přes ChatGPT zadejte platný ChatGPT API klíč.');
+      throw new Error(bt('err.chatgptPhraseNeedKey'));
     }
     const translation = await fetchChatgptPhraseTranslation(phrase, settings);
     return { sentence: phrase, translation };
   }
 
   if (!settings.apiKey) {
-    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
+    throw new Error(bt('err.needLingqKey'));
   }
 
   try {
@@ -1219,7 +1267,7 @@ async function translatePhrase(text) {
 
   const translation = await translateWithLingq(phrase, settings);
   if (!translation || translation.toLowerCase() === phrase.toLowerCase()) {
-    throw new Error('Překlad věty se nepodařilo získat.');
+    throw new Error(bt('err.phraseFailed'));
   }
   return { sentence: phrase, translation };
 }
@@ -1245,7 +1293,7 @@ async function fetchChatgptPhraseTranslation(phrase, settings) {
   const translations = parseChatgptTranslationList(parsed);
   const translation = translations[0] || '';
   if (!translation || translation.toLowerCase() === phrase.toLowerCase()) {
-    throw new Error('ChatGPT nevrátilo použitelný překlad věty.');
+    throw new Error(bt('err.chatgptBadPhrase'));
   }
   return translation;
 }
@@ -1280,7 +1328,7 @@ async function translateWithLingq(phrase, settings) {
     }
   }
 
-  throw lastError || new Error('Překlad věty se nepodařilo získat.');
+  throw lastError || new Error(bt('err.phraseFailed'));
 }
 
 function readTranslation(payload, targetLocale) {
@@ -1689,7 +1737,7 @@ async function fetchNextCardsBatch(settings, progress, { onProgress } = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/429|Too Many Requests|rate/i.test(message)) {
-        const err = new Error('LingQ dočasně omezilo API (429). Počkejte na cooldown a zkuste další dávku.');
+        const err = new Error(bt('import.err.rateLimit'));
         err.code = 'RATE_LIMIT';
         err.partial = {
           items: mapVocabularyEntries(byWord),
@@ -1802,7 +1850,7 @@ async function fetchNextKnownBatch(settings, progress, { onProgress } = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/429|Too Many Requests|rate/i.test(message)) {
-        const err = new Error('LingQ dočasně omezilo API (429). Počkejte na cooldown a zkuste další dávku.');
+        const err = new Error(bt('import.err.rateLimit'));
         err.code = 'RATE_LIMIT';
         err.partial = {
           items: words.map((word) => ({ word, status: 5, translation: null, importance: null, popularity: null })),
@@ -1883,42 +1931,48 @@ async function uploadVocabularyItems(settings, items, { onProgress } = {}) {
 
 async function syncKnownWordsToSupabase() {
   if (knownWordsSyncRunning) {
-    throw new Error('Import už běží. Počkejte na dokončení.');
+    throw new Error(bt('import.err.busy'));
   }
 
   knownWordsSyncRunning = true;
   const settings = await chrome.storage.sync.get(DEFAULTS);
   try {
     if (!settings.apiKey) {
-      throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
+      throw new Error(bt('err.needLingqKey'));
     }
     const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
     const apiKey = String(settings.supabaseKey || '').trim();
     if (!baseUrl || !apiKey) {
-      throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+      throw new Error(bt('import.err.needSupabase'));
     }
 
     let progress = await ensureImportProgress(settings, { forceRefreshTotals: true });
     if (progress.phase === 'done') {
       return enrichImportProgress({
         ...progress,
-        message: 'Import je hotový. Všechna dostupná slovíčka už byla stažena.',
+        messageKey: 'import.msg.alreadyDone',
+        messageParams: {},
+        message: bt('import.msg.alreadyDone'),
       });
     }
 
     const remaining = Number(progress.cooldownUntil) - Date.now();
     if (remaining > 0) {
       const minutes = Math.ceil(remaining / 60000);
-      throw new Error(`Další dávka bude dostupná za cca ${minutes} min (ochrana proti blokaci LingQ API).`);
+      throw new Error(bt('import.err.cooldown', { minutes }));
     }
 
     progress = enrichImportProgress({
       ...progress,
       running: true,
       error: null,
+      messageKey: progress.phase === 'known'
+        ? 'import.msg.fetchingKnown'
+        : 'import.msg.fetchingCards',
+      messageParams: {},
       message: progress.phase === 'known'
-        ? 'Stahuji dávku known words…'
-        : 'Stahuji dávku Vocabulary karet…',
+        ? bt('import.msg.fetchingKnown')
+        : bt('import.msg.fetchingCards'),
     });
     await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: progress });
 
@@ -1934,7 +1988,9 @@ async function syncKnownWordsToSupabase() {
               knownTotal,
               axisImported: fetchedKnown,
               axisTotal: knownTotal,
-              message: `Stahuji known words… ${fetchedKnown} / ${knownTotal}`,
+              messageKey: 'import.msg.fetchingKnownProgress',
+              messageParams: { n: fetchedKnown, total: knownTotal },
+              message: bt('import.msg.fetchingKnownProgress', { n: fetchedKnown, total: knownTotal }),
             }).catch(() => {});
           },
         });
@@ -1948,7 +2004,9 @@ async function syncKnownWordsToSupabase() {
               totalCards,
               axisImported: fetchedCards,
               axisTotal: totalCards,
-              message: `Stahuji karty… ${fetchedCards} / ${totalCards}`,
+              messageKey: 'import.msg.fetchingCardsProgress',
+              messageParams: { n: fetchedCards, total: totalCards },
+              message: bt('import.msg.fetchingCardsProgress', { n: fetchedCards, total: totalCards }),
             }).catch(() => {});
           },
         });
@@ -1990,7 +2048,9 @@ async function syncKnownWordsToSupabase() {
 
     await setKnownWordsSyncProgress({
       running: true,
-      message: `Nahrávám ${batchResult.items.length} slovíček do DB…`,
+      messageKey: 'import.msg.uploading',
+      messageParams: { n: batchResult.items.length },
+      message: bt('import.msg.uploading', { n: batchResult.items.length }),
     });
 
     const upload = batchResult.items.length
@@ -1998,7 +2058,9 @@ async function syncKnownWordsToSupabase() {
         onProgress: async ({ uploaded, total }) => {
           await setKnownWordsSyncProgress({
             running: true,
-            message: `Nahrávám do DB… ${uploaded} / ${total}`,
+            messageKey: 'import.msg.uploadingProgress',
+            messageParams: { n: uploaded, total },
+            message: bt('import.msg.uploadingProgress', { n: uploaded, total }),
           }).catch(() => {});
         },
       })
@@ -2007,6 +2069,8 @@ async function syncKnownWordsToSupabase() {
     const cooldownUntil = Date.now() + (progress.cooldownMs || IMPORT_COOLDOWN_MS);
     let nextPhase = progress.phase;
     let message;
+    let messageKey;
+    let messageParams;
 
     if (progress.phase === 'cards') {
       const importedCards = (Number(progress.importedCards) || 0) + (batchResult.fetchedCards || 0);
@@ -2022,9 +2086,15 @@ async function syncKnownWordsToSupabase() {
         cardsNextUrl: batchResult.nextUrl,
         phase: nextPhase,
       };
-      message = cardsDone
-        ? `Karty hotové (${importedCards}). Po cooldownu se začnou importovat known words (bez překladu zůstanou prázdné).`
-        : `Staženo karet ${importedCards} / ${progress.totalCards}. Další dávka po cooldownu.`;
+      if (cardsDone) {
+        messageKey = 'import.msg.cardsDone';
+        messageParams = { n: importedCards };
+        message = bt('import.msg.cardsDone', { n: importedCards });
+      } else {
+        messageKey = 'import.msg.cardsBatch';
+        messageParams = { n: importedCards, total: progress.totalCards };
+        message = bt('import.msg.cardsBatch', { n: importedCards, total: progress.totalCards });
+      }
     } else {
       const knownImported = (Number(progress.knownImported) || 0) + (batchResult.fetched || 0);
       const knownDone = batchResult.done || (
@@ -2039,9 +2109,15 @@ async function syncKnownWordsToSupabase() {
         knownNextUrl: batchResult.nextUrl,
         phase: nextPhase,
       };
-      message = knownDone
-        ? `Import hotový (karty + known words). Known words ${knownImported} / ${progress.knownTotal}.`
-        : `Staženo known words ${knownImported} / ${progress.knownTotal} (překlad prázdný, pokud ho karta neměla). Další dávka po cooldownu.`;
+      if (knownDone) {
+        messageKey = 'import.msg.importDone';
+        messageParams = { n: knownImported, total: progress.knownTotal };
+        message = bt('import.msg.importDone', { n: knownImported, total: progress.knownTotal });
+      } else {
+        messageKey = 'import.msg.knownBatch';
+        messageParams = { n: knownImported, total: progress.knownTotal };
+        message = bt('import.msg.knownBatch', { n: knownImported, total: progress.knownTotal });
+      }
     }
 
     const result = enrichImportProgress({
@@ -2055,12 +2131,14 @@ async function syncKnownWordsToSupabase() {
       lastBatchUpdated: upload.updated,
       lastBatchFetched: batchResult.items.length,
       error: null,
+      messageKey,
+      messageParams,
       message,
     });
     await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: result });
     return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Import slovíček z LingQ se nezdařil.';
+    const message = error instanceof Error ? error.message : bt('import.err.failed');
     const current = await readImportProgress();
     await setKnownWordsSyncProgress({
       ...(current || {}),
@@ -2114,11 +2192,9 @@ async function importLingqWordsBatch(settings, language, items) {
       || lower.includes('could not find the function')
       || lower.includes('pgrst202')
     ) {
-      throw new Error(
-        'V databázi chybí funkce import_lingq_words. Spusťte supabase/import_known_words.sql ve svém projektu Supabase (SQL Editor).'
-      );
+      throw new Error(bt('import.err.rpcMissing'));
     }
-    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   if (!text) {
@@ -2188,12 +2264,12 @@ async function lingqRequest(url, settings, options) {
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error('LingQ API klíč není platný nebo nemá potřebná oprávnění.');
+      throw new Error(bt('err.lingqInvalidKey'));
     }
     if (response.status === 404) {
-      throw new Error('LingQ API tuto operaci nepodporuje. Zkontrolujte jazyk a API klíč.');
+      throw new Error(bt('err.lingqUnsupported'));
     }
-    throw new Error(`LingQ API odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.lingqHttp', { status: response.status }));
   }
 
   return response.json();
@@ -2242,7 +2318,7 @@ function normalizeWord(word) {
 }
 
 function getErrorMessage(error) {
-  return error instanceof Error ? error.message : 'Nepodařilo se spojit s LingQ.';
+  return error instanceof Error ? error.message : bt('err.lingqConnect');
 }
 
 async function attachSupabaseViewCount(result, settings) {
@@ -2293,13 +2369,17 @@ const SUPABASE_INSTALL_SQL_FILES = [
   'supabase/lingq_offline_sync.sql',
   'supabase/schema_version.sql',
 ];
-const SUPABASE_DB_REQUIRED_MESSAGE = 'Supabase není připravená. V Nastavení vyplňte URL a klíč, nainstalujte schéma a spusťte Zkontrolovat databázi.';
+function supabaseDbRequiredMessage() {
+  return bt('db.required');
+}
 
 let supabaseReadyCache = {
   key: '',
   ready: false,
   checkedAt: 0,
   message: '',
+  messageKey: '',
+  messageParams: {},
   versionOk: true,
   structureOk: true,
   installedVersion: null,
@@ -2333,23 +2413,34 @@ function invalidateSupabaseReadyCache() {
     ready: false,
     checkedAt: 0,
     message: '',
+    messageKey: '',
+    messageParams: {},
     versionOk: true,
     structureOk: true,
     installedVersion: null,
   };
 }
 
-function rememberSupabaseReady(ready, override = null, message = '') {
+function rememberSupabaseReady(ready, override = null, message = '', messageKey = '', messageParams = {}) {
   const settings = override || {};
   const key = supabaseSettingsCacheKey(settings);
+  let resolvedKey = messageKey || '';
+  let resolvedParams = messageParams || {};
+  if (!resolvedKey) {
+    if (ready) {
+      resolvedKey = 'db.ready';
+      resolvedParams = { version: EXTENSION_SCHEMA_VERSION };
+    } else if (!message) {
+      resolvedKey = 'db.required';
+    }
+  }
   supabaseReadyCache = {
     key,
     ready: ready === true,
     checkedAt: Date.now(),
-    message: message
-      || (ready
-        ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
-        : SUPABASE_DB_REQUIRED_MESSAGE),
+    messageKey: resolvedKey,
+    messageParams: resolvedParams,
+    message: message || (resolvedKey ? bt(resolvedKey, resolvedParams) : ''),
     versionOk: ready === true,
     structureOk: ready === true,
     installedVersion: ready === true ? EXTENSION_SCHEMA_VERSION : null,
@@ -2357,6 +2448,7 @@ function rememberSupabaseReady(ready, override = null, message = '') {
 }
 
 async function getSupabaseGate({ force = false } = {}) {
+  await ensureBgLocale();
   const settings = await chrome.storage.sync.get(DEFAULTS);
   if (!isSupabaseEnabled(settings)) {
     invalidateSupabaseReadyCache();
@@ -2364,7 +2456,9 @@ async function getSupabaseGate({ force = false } = {}) {
       ready: false,
       configured: false,
       enabled: false,
-      message: 'Supabase DB je v Nastavení vypnutá.',
+      messageKey: 'db.off',
+      messageParams: {},
+      message: bt('db.off'),
       expectedVersion: EXTENSION_SCHEMA_VERSION,
       installedVersion: null,
     };
@@ -2376,7 +2470,9 @@ async function getSupabaseGate({ force = false } = {}) {
       ready: false,
       configured: false,
       enabled: true,
-      message: 'Nejdříve vyplňte Supabase URL a publishable klíč v Nastavení.',
+      messageKey: 'db.fillKeys',
+      messageParams: {},
+      message: bt('db.fillKeys'),
       expectedVersion: EXTENSION_SCHEMA_VERSION,
       installedVersion: null,
     };
@@ -2388,13 +2484,17 @@ async function getSupabaseGate({ force = false } = {}) {
     && supabaseReadyCache.checkedAt
     && (Date.now() - supabaseReadyCache.checkedAt) < SUPABASE_READY_TTL_MS;
   if (cacheHit) {
+    const messageKey = supabaseReadyCache.messageKey
+      || (supabaseReadyCache.ready ? 'db.ready' : 'db.required');
+    const messageParams = supabaseReadyCache.messageParams
+      || (supabaseReadyCache.ready ? { version: EXTENSION_SCHEMA_VERSION } : {});
     return {
       ready: supabaseReadyCache.ready,
       configured: true,
       enabled: true,
-      message: supabaseReadyCache.message || (supabaseReadyCache.ready
-        ? `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`
-        : SUPABASE_DB_REQUIRED_MESSAGE),
+      messageKey,
+      messageParams,
+      message: bt(messageKey, messageParams),
       expectedVersion: EXTENSION_SCHEMA_VERSION,
       installedVersion: supabaseReadyCache.installedVersion,
       versionOk: supabaseReadyCache.versionOk !== false,
@@ -2410,6 +2510,8 @@ async function getSupabaseGate({ force = false } = {}) {
       ready: check.ready === true,
       checkedAt: Date.now(),
       message: check.message,
+      messageKey: check.messageKey || '',
+      messageParams: check.messageParams || {},
       versionOk: check.versionOk !== false,
       structureOk: check.structureOk !== false,
       installedVersion: check.installedVersion ?? null,
@@ -2422,17 +2524,21 @@ async function getSupabaseGate({ force = false } = {}) {
       fromCache: false,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : SUPABASE_DB_REQUIRED_MESSAGE;
+    const message = error instanceof Error ? error.message : supabaseDbRequiredMessage();
     supabaseReadyCache = {
       key,
       ready: false,
       checkedAt: Date.now(),
       message,
+      messageKey: error instanceof Error ? '' : 'db.required',
+      messageParams: {},
     };
     return {
       ready: false,
       configured: true,
       message,
+      messageKey: error instanceof Error ? '' : 'db.required',
+      messageParams: {},
       expectedVersion: EXTENSION_SCHEMA_VERSION,
       installedVersion: null,
       fromCache: false,
@@ -2443,20 +2549,21 @@ async function getSupabaseGate({ force = false } = {}) {
 async function requireSupabaseReady() {
   const gate = await getSupabaseGate();
   if (!gate.ready) {
-    throw new Error(gate.message || SUPABASE_DB_REQUIRED_MESSAGE);
+    throw new Error(gate.message || supabaseDbRequiredMessage());
   }
   return gate;
 }
 
 async function resolveSupabaseSettings(override = null) {
+  await ensureBgLocale();
   const stored = await chrome.storage.sync.get(DEFAULTS);
   const baseUrl = String(override?.supabaseUrl || stored.supabaseUrl || '').trim().replace(/\/$/, '');
   const apiKey = String(override?.supabaseKey || stored.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    throw new Error('Nejdříve vyplňte Supabase URL a publishable klíč.');
+    throw new Error(bt('db.fillKeysShort'));
   }
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(baseUrl)) {
-    throw new Error('Supabase URL má vypadat jako https://xxxx.supabase.co');
+    throw new Error(bt('db.badUrl'));
   }
   return { baseUrl, apiKey, projectRef: baseUrl.replace(/^https:\/\//i, '').split('.')[0] };
 }
@@ -2493,6 +2600,7 @@ function supabaseMissingMessage(payload) {
 }
 
 async function checkSupabaseSchema(override = null) {
+  await ensureBgLocale();
   const { baseUrl, apiKey } = await resolveSupabaseSettings(override);
   const missing = [];
   const present = [];
@@ -2519,13 +2627,13 @@ async function checkSupabaseSchema(override = null) {
   for (const check of tableChecks) {
     const { response, json, text } = await supabaseRest(baseUrl, apiKey, check.path);
     if (response.ok) {
-      present.push(`tabulka ${check.id}`);
+      present.push(bt('db.table', { id: check.id }));
     } else if (response.status === 401 || response.status === 403) {
-      throw new Error('Supabase klíč není platný nebo nemá oprávnění ke čtení tabulek.');
+      throw new Error(bt('db.badKeyTables'));
     } else if (supabaseMissingMessage(json || text)) {
-      missing.push(`tabulka ${check.id}`);
+      missing.push(bt('db.table', { id: check.id }));
     } else {
-      missing.push(`tabulka ${check.id} (chyba ${response.status})`);
+      missing.push(bt('db.tableError', { id: check.id, status: response.status }));
     }
   }
 
@@ -2566,17 +2674,17 @@ async function checkSupabaseSchema(override = null) {
       body: check.body,
     });
     if (response.ok) {
-      present.push(`funkce ${check.id}`);
+      present.push(bt('db.fn', { id: check.id }));
       continue;
     }
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Supabase klíč není platný nebo nemá oprávnění k RPC funkcím.');
+      throw new Error(bt('db.badKeyRpc'));
     }
     if (supabaseMissingMessage(json || text)) {
-      missing.push(`funkce ${check.id}`);
+      missing.push(bt('db.fn', { id: check.id }));
     } else {
       // Funkce existuje, ale volání selhalo z jiného důvodu (RLS, data…).
-      present.push(`funkce ${check.id}`);
+      present.push(bt('db.fn', { id: check.id }));
     }
   }
 
@@ -2597,15 +2705,22 @@ async function checkSupabaseSchema(override = null) {
   const versionOk = installedVersion === EXTENSION_SCHEMA_VERSION;
   const ready = structureOk && versionOk;
 
-  let message;
+  let messageKey;
+  let messageParams = {};
   if (ready) {
-    message = `Databáze je připravená (schéma v${EXTENSION_SCHEMA_VERSION}).`;
+    messageKey = 'db.ready';
+    messageParams = { version: EXTENSION_SCHEMA_VERSION };
   } else if (structureOk && !installedVersion) {
-    message = `Struktura vypadá v pořádku, ale chybí značka verze. Spusťte „Nainstalovat / aktualizovat“ (doplní schema_version).`;
+    messageKey = 'db.missingVersionMark';
   } else if (structureOk && !versionOk) {
-    message = `Struktura existuje, ale verze schématu je ${installedVersion || '?'} (doplněk očekává ${EXTENSION_SCHEMA_VERSION}). Spusťte aktualizaci.`;
+    messageKey = 'db.versionMismatch';
+    messageParams = {
+      installed: installedVersion || '?',
+      expected: EXTENSION_SCHEMA_VERSION,
+    };
   } else {
-    message = `Chybí: ${missing.join(', ')}. Spusťte instalaci databáze.`;
+    messageKey = 'db.missing';
+    messageParams = { items: missing.join(', ') };
   }
 
   return {
@@ -2616,7 +2731,9 @@ async function checkSupabaseSchema(override = null) {
     installedVersion,
     missing,
     present,
-    message,
+    messageKey,
+    messageParams,
+    message: bt(messageKey, messageParams),
   };
 }
 
@@ -2625,7 +2742,7 @@ async function loadSupabaseInstallSql() {
   for (const file of SUPABASE_INSTALL_SQL_FILES) {
     const response = await fetch(chrome.runtime.getURL(file));
     if (!response.ok) {
-      throw new Error(`Nepodařilo se načíst ${file}.`);
+      throw new Error(bt('db.loadFileFailed', { file }));
     }
     const text = (await response.text()).trim();
     chunks.push(`-- ===== ${file} =====\n${text}`);
@@ -2672,7 +2789,7 @@ async function listSupabaseWords() {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+    throw new Error(bt('import.err.needSupabase'));
   }
 
   const language = encodeURIComponent(settings.language || 'en');
@@ -2687,7 +2804,7 @@ async function listSupabaseWords() {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   const rows = await response.json();
@@ -2703,10 +2820,10 @@ async function deleteWordEverywhere(word, cardId = null) {
   const original = String(word || '').trim();
   const text = normalizeWord(original);
   if (!text) {
-    throw new Error('Chybí slovíčko ke smazání.');
+    throw new Error(bt('err.missingWordDelete'));
   }
   if (!settings.apiKey) {
-    throw new Error('Nejdříve zadejte LingQ API klíč v nastavení doplňku.');
+    throw new Error(bt('err.needLingqKey'));
   }
 
   let resolvedCardId = cardId ? String(cardId) : null;
@@ -2731,19 +2848,19 @@ async function deleteWordEverywhere(word, cardId = null) {
     const created = await createCard(text, text, settings);
     const createdId = created?.pk ?? created?.id ?? null;
     if (createdId == null) {
-      throw new Error('LingQ nevrátil identifikátor karty při mazání known word.');
+      throw new Error(bt('err.lingqNoCardIdDelete'));
     }
     resolvedCardId = String(createdId);
     lingqDeleted = await deleteLingqCard(resolvedCardId, settings);
     if (!lingqDeleted) {
-      throw new Error('Slovíčko se v LingQ nepodařilo odstranit.');
+      throw new Error(bt('err.lingqDelete'));
     }
   }
 
   if (!lingqDeleted) {
     const stillThere = await findCard(text, settings).catch(() => null);
     if (stillThere) {
-      throw new Error('Slovíčko se v LingQ nepodařilo odstranit.');
+      throw new Error(bt('err.lingqDelete'));
     }
   }
 
@@ -2782,7 +2899,7 @@ async function deleteLingqCard(cardId, settings) {
     }
     lastStatus = response.status;
     if (response.status === 401 || response.status === 403) {
-      throw new Error('LingQ API klíč není platný nebo nemá potřebná oprávnění.');
+      throw new Error(bt('err.lingqInvalidKey'));
     }
     // 404 / jiná chyba — zkusíme ještě v2.
   }
@@ -2790,14 +2907,14 @@ async function deleteLingqCard(cardId, settings) {
   if (lastStatus === 404) {
     return false;
   }
-  throw new Error(`LingQ API neodstranilo kartu (${lastStatus || 'neznámá chyba'}).`);
+  throw new Error(bt('err.lingqDeleteHttp', { status: lastStatus || bt('err.unknown') }));
 }
 
 async function deleteSupabaseWord(word, settings) {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+    throw new Error(bt('import.err.needSupabase'));
   }
 
   const language = encodeURIComponent(settings.language || 'en');
@@ -2814,7 +2931,7 @@ async function deleteSupabaseWord(word, settings) {
       },
     });
     if (!response.ok) {
-      throw new Error(`Supabase neodstranilo slovíčko (${response.status}).`);
+      throw new Error(bt('err.supabaseDelete', { status: response.status }));
     }
   }
 }
@@ -2861,7 +2978,7 @@ async function getUsageStats(period = '30d') {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+    throw new Error(bt('import.err.needSupabase'));
   }
 
   const range = getStatsPeriodRange(period);
@@ -2881,7 +2998,7 @@ async function getUsageStats(period = '30d') {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   const stats = await response.json();
@@ -2898,7 +3015,7 @@ async function getLatencyStats() {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    throw new Error('Nejdříve vyplňte Supabase URL a klíč v nastavení.');
+    throw new Error(bt('import.err.needSupabase'));
   }
 
   const range = getLatencyWeekRange();
@@ -3214,7 +3331,7 @@ async function fetchLatencySummary(settings, range) {
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
-    return { error: 'Nejdříve vyplňte Supabase URL a klíč v nastavení.' };
+    return { error: bt('import.err.needSupabase') };
   }
 
   const params = new URLSearchParams({
@@ -3236,9 +3353,9 @@ async function fetchLatencySummary(settings, range) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      return { error: 'V databázi chybí tabulka lingq_latency. Spusťte supabase/latency.sql.' };
+      return { error: bt('err.latencyTableMissing') };
     }
-    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   const rows = await response.json();
@@ -3410,7 +3527,7 @@ async function syncSupabaseWord(rpcName, fields, settings) {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase odpovědělo chybou (${response.status}).`);
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   const text = await response.text();

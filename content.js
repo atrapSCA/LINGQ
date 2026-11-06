@@ -12,6 +12,25 @@ let activeRequest = 0;
 let phraseSelectionActive = false;
 let tooltip;
 
+let i18nReady = Promise.resolve();
+
+function t(key, vars) {
+  return typeof LingqI18n !== 'undefined' ? LingqI18n.t(key, vars) : key;
+}
+
+async function ensureI18n() {
+  try {
+    await i18nReady;
+  } catch {
+    // keep keys as last resort
+  }
+}
+
+if (typeof LingqI18n !== 'undefined') {
+  i18nReady = LingqI18n.loadAsync();
+  LingqI18n.watch(() => {});
+}
+
 function normalizeUiTheme(value) {
   return value === 'dark' ? 'dark' : 'light';
 }
@@ -93,7 +112,7 @@ document.addEventListener('click', (event) => {
   }
 }, false);
 
-function handlePhraseSelection(event) {
+async function handlePhraseSelection(event) {
   if (!enabled || event.button !== 0) {
     return;
   }
@@ -113,6 +132,8 @@ function handlePhraseSelection(event) {
     phraseSelectionActive = false;
   }, 0);
 
+  await ensureI18n();
+
   const isAdmin = typeof isAdminBuild === 'function' && isAdminBuild();
   const phraseViaChatgpt = phraseTranslationSource === 'chatgpt';
   // Limit 10 slov platí jen v user buildu při překladu přes LingQ.
@@ -120,7 +141,7 @@ function handlePhraseSelection(event) {
     showPhraseTooltip(
       selected.text,
       selected.rect,
-      `Výběr má ${selected.wordCount} slov. Při překladu přes LingQ je limit ${USER_PHRASE_WORD_LIMIT} slov. Otevřete překladač, nebo v Nastavení zvolte ChatGPT.`,
+      t('bubble.phraseLimit', { n: selected.wordCount, limit: USER_PHRASE_WORD_LIMIT }),
       'external',
     );
     return;
@@ -128,13 +149,13 @@ function handlePhraseSelection(event) {
 
   const requestId = ++activeRequest;
   const clickedAt = Date.now();
-  showPhraseTooltip(selected.text, selected.rect, 'Překládám větu…', 'loading');
+  showPhraseTooltip(selected.text, selected.rect, t('bubble.translatingPhrase'), 'loading');
   chrome.runtime.sendMessage({ type: 'TRANSLATE_PHRASE', text: selected.text, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
     if (chrome.runtime.lastError || !response?.ok) {
-      showPhraseTooltip(selected.text, selected.rect, response?.error || 'Překlad věty se nezdařil.', 'error');
+      showPhraseTooltip(selected.text, selected.rect, response?.error || t('bubble.phraseFailed'), 'error');
       return;
     }
     showPhraseTooltip(selected.text, selected.rect, response.translation, 'ready');
@@ -175,7 +196,7 @@ function handleClick(event) {
   lookupFromPoint(event.clientX, event.clientY, target, event);
 }
 
-function lookupFromPoint(clientX, clientY, target, event) {
+async function lookupFromPoint(clientX, clientY, target, event) {
   const clickedAt = Date.now();
   const selection = getWordSelection(clientX, clientY, target);
   if (!selection) {
@@ -184,15 +205,16 @@ function lookupFromPoint(clientX, clientY, target, event) {
 
   event.preventDefault();
   event.stopPropagation();
+  await ensureI18n();
   const requestId = ++activeRequest;
-  showTooltip(selection.word, selection.rect, 'Překládám slovo…', 'loading', 0, null, []);
+  showTooltip(selection.word, selection.rect, t('bubble.translatingWord'), 'loading', 0, null, []);
 
   chrome.runtime.sendMessage({ type: 'LOOKUP_WORD', word: selection.word, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
     if (chrome.runtime.lastError || !response?.ok) {
-      showTooltip(selection.word, selection.rect, response?.error || 'Spojení s LingQ se nezdařilo.', 'error', 0, null, []);
+      showTooltip(selection.word, selection.rect, response?.error || t('bubble.lingqFailed'), 'error', 0, null, []);
       return;
     }
     const kind = response.unknown ? 'unknown' : 'known';
@@ -247,7 +269,7 @@ function showPhraseTooltip(sentence, rect, translation, state) {
   tooltip.innerHTML = `
     <div class="lingq-tooltip__top">
       <span class="lingq-tooltip__sentence"></span>
-      <button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button>
+      <button class="lingq-tooltip__close" type="button" aria-label="${t('bubble.close')}">×</button>
     </div>
     <span class="lingq-tooltip__phrase-translation"></span>
     <div class="lingq-tooltip__actions"></div>
@@ -263,7 +285,7 @@ function showPhraseTooltip(sentence, rect, translation, state) {
     openButton.href = buildTranslatorUrl(sentence);
     openButton.target = '_blank';
     openButton.rel = 'noopener noreferrer';
-    openButton.textContent = 'Otevřít překladač';
+    openButton.textContent = t('bubble.openTranslator');
     openButton.addEventListener('click', (event) => {
       event.stopPropagation();
     });
@@ -298,11 +320,11 @@ function appendCopyButtons(container, options = {}) {
     const originalButton = document.createElement('button');
     originalButton.type = 'button';
     originalButton.className = 'lingq-tooltip__copy';
-    originalButton.textContent = 'Kopírovat originál';
+    originalButton.textContent = t('bubble.copyOriginal');
     originalButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      copyTextToClipboard(original, originalButton, 'Kopírovat originál');
+      copyTextToClipboard(original, originalButton, t('bubble.copyOriginal'));
     });
     container.appendChild(originalButton);
   }
@@ -311,12 +333,12 @@ function appendCopyButtons(container, options = {}) {
     const translationButton = document.createElement('button');
     translationButton.type = 'button';
     translationButton.className = 'lingq-tooltip__copy';
-    translationButton.textContent = 'Kopírovat překlad';
+    translationButton.textContent = t('bubble.copyTranslation');
     translationButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       const liveTranslation = tooltip?.dataset.translation || translation;
-      copyTextToClipboard(liveTranslation, translationButton, 'Kopírovat překlad');
+      copyTextToClipboard(liveTranslation, translationButton, t('bubble.copyTranslation'));
     });
     container.appendChild(translationButton);
   }
@@ -325,7 +347,7 @@ function appendCopyButtons(container, options = {}) {
 function copyTextToClipboard(text, button, idleLabel) {
   const value = String(text || '');
   if (!value) {
-    button.textContent = 'Není co kopírovat';
+    button.textContent = t('bubble.copyEmpty');
     window.setTimeout(() => {
       button.textContent = idleLabel;
     }, 1400);
@@ -333,13 +355,13 @@ function copyTextToClipboard(text, button, idleLabel) {
   }
 
   const done = () => {
-    button.textContent = 'Zkopírováno';
+    button.textContent = t('bubble.copied');
     window.setTimeout(() => {
       button.textContent = idleLabel;
     }, 1400);
   };
   const failed = () => {
-    button.textContent = 'Kopírování se nezdařilo';
+    button.textContent = t('bubble.copyFailed');
     window.setTimeout(() => {
       button.textContent = idleLabel;
     }, 1600);
@@ -437,7 +459,7 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
   const source = alternativesSource === 'chatgpt' ? 'chatgpt' : 'lingq';
   tooltip.dataset.alternativesSource = source;
   tooltip.dataset.alternativesLoaded = 'false';
-  tooltip.innerHTML = '<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="Zavřít">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="Úroveň znalosti"></div><button class="lingq-tooltip__alternatives" type="button"></button><div class="lingq-tooltip__alternative-list" hidden></div><div class="lingq-tooltip__actions" hidden></div><span class="lingq-tooltip__message" role="status"></span>';
+  tooltip.innerHTML = `<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="${t('bubble.close')}">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="${t('bubble.knowledgeGroup')}"></div><button class="lingq-tooltip__alternatives" type="button"></button><div class="lingq-tooltip__alternative-list" hidden></div><div class="lingq-tooltip__actions" hidden></div><span class="lingq-tooltip__message" role="status"></span>`;
   tooltip.querySelector('.lingq-tooltip__word').textContent = word;
   const translationElement = tooltip.querySelector('.lingq-tooltip__translation');
   translationElement.textContent = translation;
@@ -445,7 +467,7 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
   const seenCount = Number(viewCount);
   if (Number.isInteger(seenCount) && seenCount > 1 && kind !== 'loading' && kind !== 'error') {
     viewsElement.hidden = false;
-    viewsElement.textContent = `Viděno ${seenCount}×`;
+    viewsElement.textContent = t('bubble.seen', { n: seenCount });
   }
   if (kind !== 'loading' && kind !== 'error') {
     enableTranslationEditing(translationElement);
@@ -462,7 +484,7 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
         button.classList.add('lingq-level--known');
       }
       button.textContent = label;
-      button.title = `Nastavit úroveň ${label}`;
+      button.title = t('bubble.setLevel', { level: label });
       button.addEventListener('click', () => changeStatus(value));
       levels.appendChild(button);
     });
@@ -499,7 +521,7 @@ function populateAlternativeList(alternativeList, meaningLines, translationEleme
   if (meaningLines.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'lingq-tooltip__alternative lingq-tooltip__alternative--empty';
-    empty.textContent = 'Další překlady se nenašly.';
+    empty.textContent = t('bubble.altEmpty');
     alternativeList.appendChild(empty);
     return;
   }
@@ -513,8 +535,8 @@ function populateAlternativeList(alternativeList, meaningLines, translationEleme
     addButton.type = 'button';
     addButton.className = 'lingq-tooltip__add';
     addButton.textContent = '+';
-    addButton.title = 'Přidat do překladu';
-    addButton.setAttribute('aria-label', 'Přidat do překladu');
+    addButton.title = t('bubble.altAdd');
+    addButton.setAttribute('aria-label', t('bubble.altAdd'));
     addButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -534,20 +556,20 @@ function fillAlternativeList(alternativeList, meaningLines, translationElement, 
 function alternativesButtonLabel(source, state = 'show') {
   const api = source === 'chatgpt' ? 'ChatGPT' : 'LingQ';
   if (state === 'loading') {
-    return 'Načítám překlady…';
+    return t('bubble.altLoading');
   }
   if (state === 'hide') {
-    return 'Skrýt překlady';
+    return t('bubble.altHide');
   }
-  return `Další překlady (${api})`;
+  return t('bubble.altShow', { api });
 }
 
 function friendlyAlternativesError(message) {
   const text = String(message || '');
   if (/message channel closed/i.test(text) || /asynchronous response/i.test(text)) {
-    return 'ChatGPT neodpovědělo včas. Zkuste to znovu nebo zvolte rychlejší model.';
+    return t('bubble.altTimeout');
   }
-  return text || 'Další překlady se nepodařilo načíst.';
+  return text || t('bubble.altFailed');
 }
 
 function loadAlternativeTranslations(word, translation, alternativeButton, alternativeList, translationElement, rect) {
@@ -555,7 +577,7 @@ function loadAlternativeTranslations(word, translation, alternativeButton, alter
   alternativeButton.disabled = true;
   alternativeButton.textContent = alternativesButtonLabel(source, 'loading');
   alternativeList.hidden = false;
-  alternativeList.innerHTML = '<div class="lingq-tooltip__alternative lingq-tooltip__alternative--empty">Načítám další překlady…</div>';
+  alternativeList.innerHTML = `<div class="lingq-tooltip__alternative lingq-tooltip__alternative--empty">${t('bubble.altLoadingMore')}</div>`;
   placeTooltip(rect);
 
   chrome.runtime.sendMessage({
@@ -573,7 +595,7 @@ function loadAlternativeTranslations(word, translation, alternativeButton, alter
       const empty = document.createElement('div');
       empty.className = 'lingq-tooltip__alternative lingq-tooltip__alternative--empty';
       empty.textContent = friendlyAlternativesError(
-        response?.error || chrome.runtime.lastError?.message || 'Další překlady se nepodařilo načíst.',
+        response?.error || chrome.runtime.lastError?.message || t('bubble.altFailed'),
       );
       alternativeList.appendChild(empty);
       placeTooltip(rect);
@@ -646,7 +668,7 @@ function addMeaningToTranslation(line, item, translationElement) {
   translationElement.textContent = merged;
   tooltip.dataset.translation = merged;
   pendingTranslation = merged;
-  showTooltipMessage('Ukládám překlad…');
+  showTooltipMessage(t('bubble.savingTranslation'));
   chrome.runtime.sendMessage({ type: 'UPDATE_TRANSLATION', cardId, word, translation: merged }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
       translationElement.textContent = current;
@@ -655,7 +677,7 @@ function addMeaningToTranslation(line, item, translationElement) {
       if (addButton) {
         addButton.disabled = false;
       }
-      showTooltipMessage(response?.error || 'Překlad se nepodařilo uložit.');
+      showTooltipMessage(response?.error || t('bubble.saveTranslationFailed'));
       return;
     }
     if (response.cardId) {
@@ -674,7 +696,7 @@ function addMeaningToTranslation(line, item, translationElement) {
         toggle.hidden = true;
       }
     }
-    showTooltipMessage('Překlad uložen.');
+    showTooltipMessage(t('bubble.translationSaved'));
   });
 }
 
@@ -688,7 +710,7 @@ function placeTooltip(rect) {
 
 function enableTranslationEditing(element) {
   element.classList.add('lingq-tooltip__translation--editable');
-  element.title = 'Kliknutím upravíte překlad';
+  element.title = t('bubble.editTranslation');
   element.spellcheck = true;
 
   element.addEventListener('click', () => {
@@ -744,7 +766,7 @@ function saveTranslation(element) {
 
   pendingTranslation = next;
   const requestId = ++translationSaveRequest;
-  showTooltipMessage('Ukládám překlad…');
+  showTooltipMessage(t('bubble.savingTranslation'));
   chrome.runtime.sendMessage({ type: 'UPDATE_TRANSLATION', cardId, word, translation: next }, (response) => {
     if (requestId !== translationSaveRequest) {
       return;
@@ -753,7 +775,7 @@ function saveTranslation(element) {
       pendingTranslation = '';
     }
     if (chrome.runtime.lastError || !response?.ok) {
-      showTooltipMessage(response?.error || 'Překlad se nepodařilo uložit.');
+      showTooltipMessage(response?.error || t('bubble.saveTranslationFailed'));
       return;
     }
 
@@ -765,7 +787,7 @@ function saveTranslation(element) {
     if (element.getAttribute('contenteditable') !== 'true') {
       element.textContent = stored;
     }
-    showTooltipMessage('Překlad uložen.');
+    showTooltipMessage(t('bubble.translationSaved'));
   });
 }
 
@@ -776,12 +798,12 @@ function changeStatus(status) {
 
   const buttons = [...tooltip.querySelectorAll('.lingq-level')];
   buttons.forEach((button) => { button.disabled = true; });
-  showTooltipMessage('Ukládám úroveň…');
+  showTooltipMessage(t('bubble.savingLevel'));
 
   chrome.runtime.sendMessage({ type: 'UPDATE_STATUS', cardId, status, word, translation }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
       buttons.forEach((button) => { button.disabled = false; });
-      showTooltipMessage(response?.error || 'Úroveň se nepodařilo uložit.');
+      showTooltipMessage(response?.error || t('bubble.saveLevelFailed'));
       return;
     }
 
@@ -796,7 +818,7 @@ function changeStatus(status) {
       }
       button.disabled = false;
     });
-    showTooltipMessage('Úroveň uložena.');
+    showTooltipMessage(t('bubble.levelSaved'));
   });
 }
 

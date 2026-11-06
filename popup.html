@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs" data-theme="light">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,15 +13,15 @@
         <div class="brand-mark">LQ</div>
         <div>
           <h1>LingQ Click Translator</h1>
-          <p>Klikněte na slovo a uvidíte překlad</p>
+          <p data-i18n="popup.tagline">Klikněte na slovo a uvidíte překlad</p>
         </div>
       </header>
 
       <div class="status-card">
         <span class="status-dot" id="status-dot"></span>
         <div>
-          <strong id="status-title">Doplněk je aktivní</strong>
-          <span id="status-description">Funguje na všech webových stránkách</span>
+          <strong id="status-title" data-i18n="popup.status.onTitle">Doplněk je aktivní</strong>
+          <span id="status-description" data-i18n="popup.status.onDesc">Funguje na všech webových stránkách</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="enabled" />
@@ -31,21 +31,38 @@
 
       <div class="theme-card">
         <div>
-          <strong id="theme-title">Tmavé rozhraní</strong>
-          <span id="theme-description">Světlý vzhled doplňku</span>
+          <strong id="theme-title" data-i18n="popup.themeTitle">Tmavé rozhraní</strong>
+          <span id="theme-description" data-i18n="popup.themeLight">Světlý vzhled doplňku</span>
         </div>
-        <label class="switch" title="Přepnout světlé / tmavé rozhraní">
+        <label class="switch" data-i18n-title="popup.themeSwitch" title="Přepnout světlé / tmavé rozhraní">
           <input type="checkbox" id="theme-dark" />
           <span class="slider"></span>
         </label>
       </div>
 
-      <button type="button" class="open-app-button" id="open-app">
+      <div class="lang-card">
+        <div>
+          <strong data-i18n="popup.langTitle">Jazyk rozhraní</strong>
+          <span data-i18n="popup.langDesc">Texty doplňku a nastavení</span>
+        </div>
+        <label class="lang-select-wrap" for="ui-locale">
+          <select id="ui-locale" aria-label="Interface language">
+            <option value="cs">Čeština</option>
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+            <option value="fr">Français</option>
+            <option value="es">Español</option>
+          </select>
+        </label>
+      </div>
+
+      <button type="button" class="open-app-button" id="open-app" data-i18n="popup.openApp">
         Otevřít doplněk
       </button>
-      <p class="mini__hint">Slovník, Import, Statistiky, Nastavení a Návod se otevřou na celé stránce.</p>
+      <p class="mini__hint" data-i18n="popup.hint">Slovník, Import, Statistiky, Nastavení a Návod se otevřou na celé stránce.</p>
     </main>
     <script src="theme.js"></script>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

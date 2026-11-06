@@ -4,6 +4,7 @@ const DEFAULTS = {
   targetLanguage: 'cs',
   enabled: true,
   theme: 'light',
+  uiLocale: 'en',
   clickCount: 1,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,
@@ -18,6 +19,14 @@ const DEFAULTS = {
   supabaseEnabled: true,
   supabaseUrl: '',
   supabaseKey: '',
+};
+
+const CHATGPT_MODEL_PRICES = {
+  'gpt-5-nano': { input: '0.05', output: '0.40' },
+  'gpt-4o-mini': { input: '0.15', output: '0.60' },
+  'gpt-5.4-nano': { input: '0.20', output: '1.25' },
+  'gpt-5-mini': { input: '0.25', output: '2.00' },
+  'gpt-4.1-mini': { input: '0.40', output: '1.60' },
 };
 
 const CHATGPT_MODEL_IDS = [
@@ -107,7 +116,14 @@ const latencyMeta = document.getElementById('latency-meta');
 const latencyChart = document.getElementById('latency-chart');
 const statsTableBody = document.querySelector('#stats-table tbody');
 const latencyTableBody = document.querySelector('#latency-table tbody');
-const WEEKDAY_LABELS = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
+function weekdayLabels() {
+  return [0, 1, 2, 3, 4, 5, 6].map((index) => t(`weekday.${index}`));
+}
+
+function uiDateLocale() {
+  const code = window.LingqI18n ? LingqI18n.getLocale() : 'en';
+  return ({ cs: 'cs-CZ', en: 'en-US', de: 'de-DE', fr: 'fr-FR', es: 'es-ES' }[code]) || 'en-US';
+}
 
 let allWords = [];
 let wordsLoaded = false;
@@ -116,15 +132,58 @@ let statsLoading = false;
 let latencyLoading = false;
 let latencyLoaded = false;
 let supabaseReady = false;
-let supabaseGateMessage = 'Supabase není připravená.';
+let supabaseGateMessage = '';
 let supabaseSchemaNeedsUpdate = false;
 const schemaAlert = document.getElementById('schema-alert');
 const schemaAlertText = document.getElementById('schema-alert-text');
 const schemaAlertOpenSettings = document.getElementById('schema-alert-open-settings');
 
+function t(key, vars) {
+  return window.LingqI18n ? LingqI18n.t(key, vars) : key;
+}
+
+function applyUiLocale() {
+  if (!window.LingqI18n) {
+    return;
+  }
+  LingqI18n.apply();
+  // Číselné úrovně znalosti 1–4
+  [1, 2, 3, 4].forEach((level) => {
+    const option = wordStatusFilterInput?.querySelector(`option[value="${level}"]`);
+    if (option) {
+      option.textContent = t('words.statusN', { n: level });
+    }
+  });
+  renderClickHelp(clickCountInput.value);
+  applyChatgptModelLabels();
+  updateLingqAvailability();
+  updateChatgptDependentAvailability({
+    alternativesSource: alternativesSourceInput?.value,
+    newWordTranslationSource: newWordSourceInput?.value,
+    phraseTranslationSource: phraseSourceInput?.value,
+  });
+  refreshSupabaseGate({ force: false });
+  // Obnovit kalendář / tabulky s novým jazykem, pokud už jsou načtené.
+  if (statsHeatmap?.dataset.loaded) {
+    loadStats(true);
+  }
+  if (latencyLoaded) {
+    loadLatency(true);
+  }
+}
+
 if (window.LingqTheme) {
   LingqTheme.load();
   LingqTheme.watch();
+}
+
+if (window.LingqI18n) {
+  LingqI18n.load(() => {
+    applyUiLocale();
+  });
+  LingqI18n.watch(() => {
+    applyUiLocale();
+  });
 }
 
 chrome.runtime.sendMessage({ type: 'APP_OPENED' }, () => {
@@ -166,13 +225,13 @@ syncKnownWordsButton.addEventListener('click', () => {
 });
 
 resetLingqImportButton.addEventListener('click', () => {
-  if (!window.confirm('Resetovat progress importu z LingQ? Už nahraná slovíčka v DB zůstanou.')) {
+  if (!window.confirm(t('import.confirmReset'))) {
     return;
   }
   chrome.runtime.sendMessage({ type: 'RESET_LINGQ_IMPORT_PROGRESS' }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
       setKnownWordsStatus(
-        response?.error || chrome.runtime.lastError?.message || 'Progress se nepodařilo resetovat.',
+        response?.error || chrome.runtime.lastError?.message || t('import.err.resetFailed'),
         'error',
       );
       return;
@@ -231,7 +290,7 @@ form.addEventListener('submit', async (event) => {
   if (!lingqEnabled && !(supabaseEnabled && supabaseReady && chatgptEnabled && valid)) {
     lingqEnabled = true;
     lingqEnabledInput.checked = true;
-    formMessage.textContent = 'LingQ nelze vypnout bez připravené DB a platného ChatGPT klíče.';
+    formMessage.textContent = t('settings.cannotDisableLingq');
   }
   const offlineOnly = !lingqEnabled;
   const alternativesSource = offlineOnly || (chatgptEnabled && valid && alternativesSourceInput.value === 'chatgpt')
@@ -266,7 +325,7 @@ form.addEventListener('submit', async (event) => {
     const idleRange = readIdleRange();
     latencyIdleMinInput.value = String(idleRange.latencyIdleMinSeconds);
     latencyIdleMaxInput.value = String(idleRange.latencyIdleMaxSeconds);
-    formMessage.textContent = 'Nastavení bylo uloženo.';
+    formMessage.textContent = t('settings.saved');
     wordsLoaded = false;
     latencyLoaded = false;
     refreshSupabaseGate({ force: true });
@@ -350,7 +409,7 @@ lingqEnabledInput.addEventListener('change', () => {
   }
   chrome.storage.sync.set({ lingqEnabled: true }, () => {
     if (lingqSyncStatus) {
-      lingqSyncStatus.textContent = 'Spouštím synchronizaci DB → LingQ…';
+      lingqSyncStatus.textContent = t('settings.syncStarting');
     }
     chrome.runtime.sendMessage({ type: 'SYNC_DB_TO_LINGQ' }, () => {
       pollLingqSyncStatus(true);
@@ -496,16 +555,16 @@ function canDisableLingq() {
 function getLingqDisableBlockReasons() {
   const reasons = [];
   if (!supabaseEnabledInput.checked) {
-    reasons.push('zapněte Supabase DB');
+    reasons.push(t('settings.needSupabaseOn'));
   } else if (!supabaseReady) {
-    reasons.push('ověřte / aktualizujte Supabase DB (musí být připravená)');
+    reasons.push(t('settings.needSupabaseReady'));
   }
   if (!chatgptEnabledInput.checked) {
-    reasons.push('zapněte ChatGPT');
+    reasons.push(t('settings.needChatgptOn'));
   } else if (!chatgptApiKeyInput.value.trim()) {
-    reasons.push('vyplňte ChatGPT API klíč');
+    reasons.push(t('settings.needChatgptKey'));
   } else if (!chatgptApiKeyValid) {
-    reasons.push('ověřte platný ChatGPT API klíč');
+    reasons.push(t('settings.needChatgptValid'));
   }
   return reasons;
 }
@@ -517,8 +576,8 @@ function showLingqDisableBlockedAlert() {
   const reasons = getLingqDisableBlockReasons();
   lingqBlockAlert.hidden = false;
   lingqBlockAlert.textContent = reasons.length
-    ? `LingQ nelze vypnout. Tato akce je možná jen když funguje Supabase DB a je vyplněný platný ChatGPT klíč. Chybí: ${reasons.join('; ')}.`
-    : 'LingQ nelze vypnout. Tato akce je možná jen když funguje Supabase DB a je vyplněný platný ChatGPT klíč.';
+    ? t('settings.lingqBlock', { reasons: reasons.join('; ') })
+    : t('settings.lingqBlockPlain');
 }
 
 function hideLingqDisableBlockedAlert() {
@@ -536,8 +595,8 @@ function updateLingqAvailability() {
   }
   if (lingqEnabledHelp) {
     lingqEnabledHelp.textContent = canOff || !lingqEnabledInput.checked
-      ? 'Bez LingQ doplněk ukládá slovíčka do Supabase a překládá přes ChatGPT. Po opětovném zapnutí se změny synchronizují do LingQ.'
-      : 'LingQ lze vypnout pouze tehdy, když funguje Supabase DB a je vyplněný platný ChatGPT API klíč.';
+      ? t('settings.lingqHelp')
+      : t('settings.lingqHelpNeedDeps');
   }
   if (!lingqEnabledInput.checked) {
     newWordSourceInput.value = 'chatgpt';
@@ -604,8 +663,8 @@ function updateChatgptDependentAvailability(preferences = {}) {
     alternativesSourceInput.value = lingqOn ? 'lingq' : 'chatgpt';
     phraseSourceInput.value = lingqOn ? 'lingq' : 'chatgpt';
     chatgptModelHelp.textContent = chatgptOn
-      ? 'Model lze zvolit až po ověření ChatGPT API klíče. Ceny jsou za 1 milion tokenů (vstup / výstup).'
-      : 'Zapněte ChatGPT a vyplňte platný klíč, pokud chcete volit model.';
+      ? t('settings.chatgptModelHelpNeedKey')
+      : t('settings.chatgptModelHelpOff');
     return;
   }
 
@@ -620,20 +679,20 @@ function updateChatgptDependentAvailability(preferences = {}) {
     newWordSourceInput.value = 'chatgpt';
     alternativesSourceInput.value = 'chatgpt';
     phraseSourceInput.value = 'chatgpt';
-    newWordSourceHelp.textContent = 'LingQ je vypnuté — nová slovíčka překládá ChatGPT do databáze.';
-    alternativesSourceHelp.textContent = 'LingQ je vypnuté — další překlady jdou přes ChatGPT.';
-    phraseSourceHelp.textContent = 'LingQ je vypnuté — věty překládá ChatGPT bez limitu délky.';
-    chatgptModelHelp.textContent = 'Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI.';
+    newWordSourceHelp.textContent = t('help.newWordOffline');
+    alternativesSourceHelp.textContent = t('help.altOffline');
+    phraseSourceHelp.textContent = t('help.phraseOffline');
+    chatgptModelHelp.textContent = t('settings.chatgptModelHelpShort');
     return;
   }
 
   newWordSourceInput.value = preferredNewWord === 'chatgpt' ? 'chatgpt' : 'lingq';
   alternativesSourceInput.value = preferredAlternatives === 'chatgpt' ? 'chatgpt' : 'lingq';
   phraseSourceInput.value = preferredPhrase === 'chatgpt' ? 'chatgpt' : 'lingq';
-  newWordSourceHelp.textContent = 'Slovíčka, která ještě nejsou v LingQ. Po překladu se karta v LingQ stejně založí.';
-  alternativesSourceHelp.textContent = 'Zdroj sekce „Další překlady“ ve vyskakovací bublině. ChatGPT se volá až po kliknutí na tlačítko.';
+  newWordSourceHelp.textContent = t('help.newWord');
+  alternativesSourceHelp.textContent = t('help.alternatives');
   updatePhraseSourceHelp(phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq');
-  chatgptModelHelp.textContent = 'Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI. Výchozí je gpt-5-nano.';
+  chatgptModelHelp.textContent = t('settings.chatgptModelHelp');
 }
 
 function updatePhraseSourceHelp(source) {
@@ -641,10 +700,10 @@ function updatePhraseSourceHelp(source) {
     return;
   }
   if (source === 'chatgpt') {
-    phraseSourceHelp.textContent = 'ChatGPT překládá věty bez limitu délky. V user verzi by u LingQ platil limit 10 slov.';
+    phraseSourceHelp.textContent = t('help.phraseChatgpt');
     return;
   }
-  phraseSourceHelp.textContent = 'V user verzi je při překladu přes LingQ výběr omezen na 10 slov; delší text otevře překladač. ChatGPT (i admin u LingQ) délku neomezuje.';
+  phraseSourceHelp.textContent = t('help.phraseLingq');
 }
 
 function validateChatgptApiKey(apiKey, options = {}) {
@@ -653,7 +712,7 @@ function validateChatgptApiKey(apiKey, options = {}) {
   if (!key) {
     chatgptApiKeyValid = false;
     if (!options.quiet) {
-      setChatgptKeyStatus('Bez API klíče nelze použít ChatGPT pro překlady.', 'warn');
+      setChatgptKeyStatus(t('settings.chatgptNoKey'), 'warn');
     }
     updateChatgptDependentAvailability({
       alternativesSource: 'lingq',
@@ -664,7 +723,7 @@ function validateChatgptApiKey(apiKey, options = {}) {
   }
 
   if (!options.quiet) {
-    setChatgptKeyStatus('Ověřuji ChatGPT API klíč…');
+    setChatgptKeyStatus(t('settings.chatgptValidating'));
   }
 
   return new Promise((resolve) => {
@@ -675,7 +734,7 @@ function validateChatgptApiKey(apiKey, options = {}) {
       }
       if (chrome.runtime.lastError || !response?.ok) {
         chatgptApiKeyValid = false;
-        setChatgptKeyStatus(response?.error || chrome.runtime.lastError?.message || 'ChatGPT API klíč se nepodařilo ověřit.', 'error');
+        setChatgptKeyStatus(response?.error || chrome.runtime.lastError?.message || t('settings.chatgptInvalid'), 'error');
         updateChatgptDependentAvailability({
           alternativesSource: 'lingq',
           newWordTranslationSource: 'lingq',
@@ -686,7 +745,7 @@ function validateChatgptApiKey(apiKey, options = {}) {
         return;
       }
       chatgptApiKeyValid = true;
-      setChatgptKeyStatus('ChatGPT API klíč je platný.', 'ok');
+      setChatgptKeyStatus(t('settings.chatgptValid'), 'ok');
       updateChatgptDependentAvailability({
         alternativesSource: alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq',
         newWordTranslationSource: newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq',
@@ -703,19 +762,19 @@ chrome.runtime.sendMessage({ type: 'NOTE_ACTIVITY' });
 toggleKeyButton.addEventListener('click', () => {
   const showing = apiKeyInput.type === 'text';
   apiKeyInput.type = showing ? 'password' : 'text';
-  toggleKeyButton.textContent = showing ? 'Zobrazit' : 'Skrýt';
+  toggleKeyButton.textContent = showing ? t('settings.show') : t('settings.hide');
 });
 
 toggleChatgptKeyButton.addEventListener('click', () => {
   const showing = chatgptApiKeyInput.type === 'text';
   chatgptApiKeyInput.type = showing ? 'password' : 'text';
-  toggleChatgptKeyButton.textContent = showing ? 'Zobrazit' : 'Skrýt';
+  toggleChatgptKeyButton.textContent = showing ? t('settings.show') : t('settings.hide');
 });
 
 toggleSupabaseKeyButton.addEventListener('click', () => {
   const showing = supabaseKeyInput.type === 'text';
   supabaseKeyInput.type = showing ? 'password' : 'text';
-  toggleSupabaseKeyButton.textContent = showing ? 'Zobrazit' : 'Skrýt';
+  toggleSupabaseKeyButton.textContent = showing ? t('settings.show') : t('settings.hide');
 });
 
 checkSupabaseDbButton.addEventListener('click', () => {
@@ -783,21 +842,36 @@ function applyDbGateUi() {
   }
 }
 
+function resolveDbStatusText(response = {}) {
+  if (response.messageKey) {
+    return t(response.messageKey, response.messageParams || {});
+  }
+  if (response.ready) {
+    return t('db.ready', {
+      version: response.expectedVersion || response.installedVersion || '?',
+    });
+  }
+  return response.message
+    || response.error
+    || t('settings.dbNotReady');
+}
+
 function refreshSupabaseGate({ force = false } = {}) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_SUPABASE_STATUS', force }, (response) => {
       if (chrome.runtime.lastError || !response?.ok) {
         supabaseReady = false;
         supabaseSchemaNeedsUpdate = false;
-        supabaseGateMessage = response?.error
-          || chrome.runtime.lastError?.message
-          || 'Supabase není připravená.';
+        supabaseGateMessage = resolveDbStatusText({
+          message: response?.error || chrome.runtime.lastError?.message,
+        });
         applySchemaUpdateAlert({});
+        if (supabaseDbStatus) {
+          setSupabaseDbStatus(supabaseGateMessage, 'error');
+        }
       } else {
         supabaseReady = response.ready === true;
-        supabaseGateMessage = response.message || (supabaseReady
-          ? 'Databáze je připravená.'
-          : 'Supabase není připravená.');
+        supabaseGateMessage = resolveDbStatusText(response);
         const configured = response.configured === true && response.enabled !== false;
         const versionMismatch = configured
           && response.structureOk === true
@@ -812,6 +886,10 @@ function refreshSupabaseGate({ force = false } = {}) {
           && response.structureOk === false;
         supabaseSchemaNeedsUpdate = Boolean(versionMismatch || missingVersion || schemaBroken);
         applySchemaUpdateAlert(response);
+        if (supabaseDbStatus && (response.messageKey || response.ready || response.message)) {
+          const tone = response.ready ? 'ok' : (response.structureOk ? 'warn' : 'error');
+          setSupabaseDbStatus(supabaseGateMessage, response.ready || response.structureOk ? tone : 'error');
+        }
       }
       applyDbGateUi();
       updateLingqAvailability();
@@ -829,16 +907,12 @@ function applySchemaUpdateAlert(response = {}) {
     return;
   }
   const expected = response.expectedVersion || '?';
-  const installed = response.installedVersion || 'neznámá / chybí';
+  const installed = response.installedVersion || t('settings.schemaUnknown');
   if (schemaAlertText) {
     if (response.structureOk === false) {
-      schemaAlertText.textContent = `Databáze neodpovídá aktuálnímu doplňku (očekávané schéma v${expected}). `
-        + 'Bez aktualizace databáze nebude doplněk řádně fungovat. '
-        + 'Otevřete Nastavení → Supabase DB → Nainstalovat / aktualizovat databázi.';
+      schemaAlertText.textContent = t('settings.schemaBroken', { expected });
     } else {
-      schemaAlertText.textContent = `Doplněk očekává schéma v${expected}, v databázi je ${installed}. `
-        + 'Bez aktualizace databáze nebude doplněk řádně fungovat. '
-        + 'Otevřete Nastavení → Supabase DB → Nainstalovat / aktualizovat databázi.';
+      schemaAlertText.textContent = t('settings.schemaMismatch', { expected, installed });
     }
   }
   schemaAlert.hidden = false;
@@ -896,38 +970,38 @@ function latencyRows(latency) {
     return [];
   }
   if (latency.error) {
-    return [['Odezva LingQ', latency.error]];
+    return [[t('tab.latency'), latency.error]];
   }
   const sourceLabel = {
-    click: 'kliknutí',
-    idle: 'nečinnost',
-    probe: 'nečinnost',
-    phrase: 'věta',
+    click: t('latency.legendClick'),
+    idle: t('latency.legendIdle'),
+    probe: t('latency.legendIdle'),
+    phrase: t('latency.legendPhrase'),
   };
   const last = latency.lastMs == null
     ? '—'
-    : `${formatDuration(latency.lastMs)} · ${sourceLabel[latency.lastSource] || 'měření'}${latency.lastOk === false ? ' · chyba' : ''}`;
+    : `${formatDuration(latency.lastMs)} · ${sourceLabel[latency.lastSource] || '—'}${latency.lastOk === false ? ' · ✕' : ''}`;
   const statusRows = [
-    ['new', 'nové slovíčko'],
-    ['1', 'znalost 1'],
-    ['2', 'znalost 2'],
-    ['3', 'znalost 3'],
-    ['4', 'znalost 4'],
-    ['K', 'znalost K'],
+    ['new', t('latency.knowledge', { level: 'new' })],
+    ['1', t('latency.knowledge', { level: '1' })],
+    ['2', t('latency.knowledge', { level: '2' })],
+    ['3', t('latency.knowledge', { level: '3' })],
+    ['4', t('latency.knowledge', { level: '4' })],
+    ['K', t('latency.knowledge', { level: 'K' })],
   ].map(([key, label]) => {
     const item = latency.byStatus?.[key];
     if (!item?.count) {
-      return [`Odezva · ${label}`, '—'];
+      return [label, '—'];
     }
-    return [`Odezva · ${label}`, `${formatDuration(item.avgMs)} (${item.count}×)`];
+    return [label, `${formatDuration(item.avgMs)} (${item.count}×)`];
   });
   return [
-    ['Průměrná odezva LingQ', formatDuration(latency.avgMs)],
-    ['Odezva po kliknutí', latency.clickCount ? `${formatDuration(latency.clickAvgMs)} (${latency.clickCount}×)` : '—'],
-    ['Odezva kontrolního dotazu', latency.probeCount ? `${formatDuration(latency.probeAvgMs)} (${latency.probeCount}×)` : '—'],
-    ['Odezva překladu věty', latency.phraseCount ? `${formatDuration(latency.phraseAvgMs)} (${latency.phraseCount}×)` : '—'],
+    [t('latency.avg'), formatDuration(latency.avgMs)],
+    [t('latency.afterClick'), latency.clickCount ? `${formatDuration(latency.clickAvgMs)} (${latency.clickCount}×)` : '—'],
+    [t('latency.idleProbe'), latency.probeCount ? `${formatDuration(latency.probeAvgMs)} (${latency.probeCount}×)` : '—'],
+    [t('latency.phrase'), latency.phraseCount ? `${formatDuration(latency.phraseAvgMs)} (${latency.phraseCount}×)` : '—'],
     ...statusRows,
-    ['Poslední odezva', last],
+    [t('latency.last'), last],
   ];
 }
 
@@ -960,7 +1034,7 @@ function renderLatencyWeekChart(week) {
   const idleHourly = averageLatencyByHour(week?.idle);
   const phraseHourly = averageLatencyByHour(week?.phrase);
   if (!week || (clickHourly.length === 0 && idleHourly.length === 0 && phraseHourly.length === 0)) {
-    latencyChart.innerHTML = '<div class="latency-chart__empty">Zatím žádná měření odezvy za posledních 7 dní.</div>';
+    latencyChart.innerHTML = `<div class="latency-chart__empty">${t('latency.empty')}</div>`;
     return;
   }
 
@@ -1009,7 +1083,7 @@ function renderLatencyWeekChart(week) {
     return `<line class="latency-grid" x1="${pad.left}" y1="${y.toFixed(1)}" x2="${(pad.left + plotW).toFixed(1)}" y2="${y.toFixed(1)}" /><text class="latency-y" x="${pad.left - 6}" y="${(y + 3).toFixed(1)}">${formatChartAxisMs(ms, axisUnit)}</text>`;
   }).join('');
 
-  latencyChart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Hodinový průměr odezvy LingQ">
+  latencyChart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${t('latency.chartAria')}">
     <rect class="latency-plot" x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" />
     ${grid}
     ${dayLines.join('')}
@@ -1070,7 +1144,7 @@ function formatChartAxisMs(ms, unit) {
 }
 
 function formatChartDay(date) {
-  return new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(uiDateLocale(), { weekday: 'short', day: 'numeric' }).format(date);
 }
 
 function polylinePath(points, xOf, yOf, className) {
@@ -1096,8 +1170,8 @@ function dotsMarkup(points, xOf, yOf, className) {
 
 function renderClickHelp(clickCount) {
   clickHelp.textContent = Number(clickCount) === 2
-    ? 'Bublina se otevře po dvou kliknutích myší na slovo.'
-    : 'Bublina se otevře po jednom kliknutí myši na slovo. U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.';
+    ? t('settings.clickHelp2')
+    : t('settings.clickHelp1');
 }
 
 function setKnownWordsStatus(message, tone = '') {
@@ -1139,7 +1213,7 @@ function persistSupabaseFormSettings() {
 async function runSupabaseDbCheck() {
   checkSupabaseDbButton.disabled = true;
   installSupabaseDbButton.disabled = true;
-  setSupabaseDbStatus('Kontroluji databázi…');
+  setSupabaseDbStatus(t('settings.dbChecking'));
   try {
     const settings = await persistSupabaseFormSettings();
     chrome.runtime.sendMessage({ type: 'CHECK_SUPABASE_SCHEMA', settings }, (response) => {
@@ -1147,15 +1221,16 @@ async function runSupabaseDbCheck() {
       installSupabaseDbButton.disabled = false;
       if (chrome.runtime.lastError || !response?.ok) {
         setSupabaseDbStatus(
-          response?.error || chrome.runtime.lastError?.message || 'Kontrola databáze se nezdařila.',
+          response?.error || chrome.runtime.lastError?.message || t('settings.dbCheckFailed'),
           'error',
         );
         return;
       }
       const tone = response.ready ? 'ok' : (response.structureOk ? 'warn' : 'error');
-      setSupabaseDbStatus(response.message, tone);
+      const statusText = resolveDbStatusText(response);
+      setSupabaseDbStatus(statusText, tone);
       supabaseReady = response.ready === true;
-      supabaseGateMessage = response.message || supabaseGateMessage;
+      supabaseGateMessage = statusText;
       supabaseSchemaNeedsUpdate = response.ready !== true;
       applySchemaUpdateAlert({
         ...response,
@@ -1173,14 +1248,14 @@ async function runSupabaseDbCheck() {
   } catch (error) {
     checkSupabaseDbButton.disabled = false;
     installSupabaseDbButton.disabled = false;
-    setSupabaseDbStatus(error instanceof Error ? error.message : 'Kontrola databáze se nezdařila.', 'error');
+    setSupabaseDbStatus(error instanceof Error ? error.message : t('settings.dbCheckFailed'), 'error');
   }
 }
 
 async function runSupabaseDbInstall() {
   checkSupabaseDbButton.disabled = true;
   installSupabaseDbButton.disabled = true;
-  setSupabaseDbStatus('Připravuji instalaci…');
+  setSupabaseDbStatus(t('settings.dbInstalling'));
   try {
     const settings = await persistSupabaseFormSettings();
     chrome.runtime.sendMessage({ type: 'PREPARE_SUPABASE_INSTALL', settings }, async (response) => {
@@ -1188,17 +1263,18 @@ async function runSupabaseDbInstall() {
       installSupabaseDbButton.disabled = false;
       if (chrome.runtime.lastError || !response?.ok) {
         setSupabaseDbStatus(
-          response?.error || chrome.runtime.lastError?.message || 'Instalace se nezdařila.',
+          response?.error || chrome.runtime.lastError?.message || t('settings.dbInstallFailed'),
           'error',
         );
         return;
       }
 
       if (response.ready) {
-        setSupabaseDbStatus(response.message || 'Databáze už je aktuální.', 'ok');
+        const statusText = resolveDbStatusText(response) || t('settings.dbAlreadyCurrent');
+        setSupabaseDbStatus(statusText, 'ok');
         supabaseReady = true;
         supabaseSchemaNeedsUpdate = false;
-        supabaseGateMessage = response.message || supabaseGateMessage;
+        supabaseGateMessage = statusText;
         applySchemaUpdateAlert({});
         applyDbGateUi();
         updateLingqAvailability();
@@ -1221,10 +1297,7 @@ async function runSupabaseDbInstall() {
       try {
         await navigator.clipboard.writeText(response.sql || '');
       } catch {
-        setSupabaseDbStatus(
-          'SQL se nepodařilo zkopírovat do schránky. Otevřete SQL Editor a soubory spusťte ručně ze složky supabase/.',
-          'error',
-        );
+        setSupabaseDbStatus(t('settings.dbClipboardFailed'), 'error');
         if (response.editorUrl) {
           window.open(response.editorUrl, '_blank', 'noopener,noreferrer');
         }
@@ -1235,19 +1308,33 @@ async function runSupabaseDbInstall() {
         window.open(response.editorUrl, '_blank', 'noopener,noreferrer');
       }
       setSupabaseDbStatus(
-        `${response.message} SQL (${response.fileCount} souborů) je ve schránce — v SQL Editoru vložte (Ctrl+V) a spusťte Run. Pak klikněte na Zkontrolovat databázi.`,
+        `${resolveDbStatusText(response)} ${t('settings.dbSqlCopiedTail', { n: formatKnownCount(response.fileCount) })}`.trim(),
         'warn',
       );
     });
   } catch (error) {
     checkSupabaseDbButton.disabled = false;
     installSupabaseDbButton.disabled = false;
-    setSupabaseDbStatus(error instanceof Error ? error.message : 'Instalace se nezdařila.', 'error');
+    setSupabaseDbStatus(error instanceof Error ? error.message : t('settings.dbInstallFailed'), 'error');
   }
 }
 
+function applyChatgptModelLabels() {
+  if (!chatgptModelInput) {
+    return;
+  }
+  const perMillion = t('settings.perMillion');
+  chatgptModelInput.querySelectorAll('option').forEach((option) => {
+    const prices = CHATGPT_MODEL_PRICES[option.value];
+    if (!prices) {
+      return;
+    }
+    option.textContent = `${option.value} — $${prices.input} / $${prices.output} ${perMillion}`;
+  });
+}
+
 function formatKnownCount(value) {
-  return new Intl.NumberFormat('cs-CZ').format(Number(value) || 0);
+  return new Intl.NumberFormat(uiDateLocale()).format(Number(value) || 0);
 }
 
 function formatCooldown(ms) {
@@ -1285,8 +1372,8 @@ function updateImportProgressUi(progress) {
   importKnownNumbers.textContent = `${formatKnownCount(knownImported)} / ${formatKnownCount(knownTotal)}`;
 
   const phaseLabel = progress.phase === 'known'
-    ? 'Právě: known words'
-    : (progress.phase === 'done' ? 'Hotovo (karty + known words)' : 'Právě: Vocabulary karty');
+    ? t('import.phaseNowKnown')
+    : (progress.phase === 'done' ? t('import.phaseDoneBoth') : t('import.phaseNowCards'));
   const imported = Number(progress.axisImported) || 0;
   const total = Number(progress.axisTotal) || 0;
   const percent = Number(progress.axisPercent) || 0;
@@ -1297,11 +1384,52 @@ function updateImportProgressUi(progress) {
   importProgressBar.setAttribute('aria-valuenow', String(percent));
 }
 
+function resolveImportStatusText(progress) {
+  if (!progress) {
+    return '';
+  }
+  if (progress.messageKey) {
+    const params = { ...(progress.messageParams || {}) };
+    ['n', 'total', 'inserted', 'updated'].forEach((key) => {
+      if (params[key] != null) {
+        params[key] = formatKnownCount(params[key]);
+      }
+    });
+    return t(progress.messageKey, params);
+  }
+  if (progress.running) {
+    return progress.message || t('import.msg.working');
+  }
+  if (progress.phase === 'done') {
+    return t('import.msg.doneStats', {
+      inserted: formatKnownCount(progress.insertedTotal),
+      updated: formatKnownCount(progress.updatedTotal),
+    });
+  }
+  if (progress.phase === 'cards') {
+    return t('import.msg.cardsBatch', {
+      n: formatKnownCount(progress.importedCards),
+      total: formatKnownCount(progress.totalCards),
+    });
+  }
+  if (progress.phase === 'known') {
+    const knownImported = Number(progress.knownImported) || 0;
+    if (knownImported <= 0) {
+      return t('import.msg.cardsDone', { n: formatKnownCount(progress.importedCards) });
+    }
+    return t('import.msg.knownBatch', {
+      n: formatKnownCount(knownImported),
+      total: formatKnownCount(progress.knownTotal),
+    });
+  }
+  return progress.message || t('import.msg.ready');
+}
+
 function renderKnownWordsSyncProgress(progress) {
   clearImportCooldownTimer();
   if (!progress) {
     syncKnownWordsButton.disabled = false;
-    syncKnownWordsButton.textContent = 'Importovat dalších 5 000';
+    syncKnownWordsButton.textContent = t('import.button');
     resetLingqImportButton.disabled = false;
     updateImportProgressUi(null);
     return;
@@ -1312,19 +1440,15 @@ function renderKnownWordsSyncProgress(progress) {
 
   if (progress.running) {
     syncKnownWordsButton.disabled = true;
-    syncKnownWordsButton.textContent = 'Import probíhá…';
-    setKnownWordsStatus(progress.message || 'Pracuji…');
+    syncKnownWordsButton.textContent = t('import.running');
+    setKnownWordsStatus(resolveImportStatusText(progress));
     return;
   }
 
   if (progress.phase === 'done') {
     syncKnownWordsButton.disabled = true;
-    syncKnownWordsButton.textContent = 'Import dokončen';
-    setKnownWordsStatus(
-      progress.message
-        || `Hotovo. Nová celkem ${formatKnownCount(progress.insertedTotal)}, aktualizovaná ${formatKnownCount(progress.updatedTotal)}.`,
-      'ok',
-    );
+    syncKnownWordsButton.textContent = t('import.done');
+    setKnownWordsStatus(resolveImportStatusText(progress), 'ok');
     return;
   }
 
@@ -1338,9 +1462,9 @@ function renderKnownWordsSyncProgress(progress) {
         restoreKnownWordsSyncStatus();
         return;
       }
-      syncKnownWordsButton.textContent = `Další dávka za ${formatCooldown(left)}`;
+      syncKnownWordsButton.textContent = t('import.nextIn', { time: formatCooldown(left) });
       setKnownWordsStatus(
-        `${progress.message || 'Dávka uložena.'} Pro ochranu LingQ API počkejte na další import.`,
+        `${resolveImportStatusText(progress)} ${t('import.msg.cooldownHint')}`,
         'ok',
       );
     };
@@ -1351,13 +1475,13 @@ function renderKnownWordsSyncProgress(progress) {
 
   syncKnownWordsButton.disabled = false;
   const batch = Number(progress.batchSize) || 5000;
-  syncKnownWordsButton.textContent = `Importovat dalších ${formatKnownCount(batch)}`;
+  syncKnownWordsButton.textContent = t('import.buttonN', { n: formatKnownCount(batch) });
   if (progress.error) {
     setKnownWordsStatus(progress.error, 'error');
-  } else if (progress.message) {
-    setKnownWordsStatus(progress.message, 'ok');
+  } else if (progress.message || progress.messageKey || progress.phase) {
+    setKnownWordsStatus(resolveImportStatusText(progress), 'ok');
   } else {
-    setKnownWordsStatus('Připraveno ke stažení další dávky z LingQ.');
+    setKnownWordsStatus(t('import.msg.ready'));
   }
 }
 
@@ -1385,12 +1509,12 @@ function startKnownWordsSync() {
     return;
   }
   syncKnownWordsButton.disabled = true;
-  syncKnownWordsButton.textContent = 'Import probíhá…';
-  setKnownWordsStatus('Spouštím další dávku z LingQ…');
+  syncKnownWordsButton.textContent = t('import.running');
+  setKnownWordsStatus(t('import.startingBatch'));
   chrome.runtime.sendMessage({ type: 'SYNC_KNOWN_WORDS' }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
       setKnownWordsStatus(
-        response?.error || chrome.runtime.lastError?.message || 'Import z LingQ se nezdařil.',
+        response?.error || chrome.runtime.lastError?.message || t('import.err.failed'),
         'error',
       );
       restoreKnownWordsSyncStatus();
@@ -1420,7 +1544,7 @@ function loadWords(force) {
   }
 
   wordsLoading = true;
-  wordsMeta.textContent = 'Načítám slovíčka…';
+  wordsMeta.textContent = t('words.loading');
   wordsList.innerHTML = '';
 
   chrome.runtime.sendMessage({ type: 'LIST_SUPABASE_WORDS' }, (response) => {
@@ -1429,7 +1553,7 @@ function loadWords(force) {
       wordsLoaded = false;
       allWords = [];
       wordsMeta.textContent = '';
-      wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || 'Slovník se nepodařilo načíst.'}</div>`;
+      wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('words.loadFailed')}</div>`;
       return;
     }
 
@@ -1477,24 +1601,24 @@ function renderWords() {
   });
 
   if (allWords.length === 0) {
-    wordsMeta.textContent = 'V databázi zatím nejsou žádná slovíčka.';
-    wordsList.innerHTML = '<div class="words-empty">Klikni na slovo na stránce — uloží se sem.</div>';
+    wordsMeta.textContent = t('words.emptyDb');
+    wordsList.innerHTML = `<div class="words-empty">${t('words.emptyHint')}</div>`;
     return;
   }
 
   if (totalWithTranslation === 0) {
-    wordsMeta.textContent = 'Žádná slovíčka s překladem.';
-    wordsList.innerHTML = '<div class="words-empty">Slova bez překladu se ve slovníku nezobrazují.</div>';
+    wordsMeta.textContent = t('words.noTranslation');
+    wordsList.innerHTML = `<div class="words-empty">${t('words.noTranslationHint')}</div>`;
     return;
   }
 
   const filtered = query || statusFilter !== 'all';
   wordsMeta.textContent = filtered
-    ? `Zobrazeno ${items.length} z ${totalWithTranslation}`
-    : `${totalWithTranslation} slovíček`;
+    ? t('words.shown', { n: items.length, total: totalWithTranslation })
+    : t('words.count', { n: totalWithTranslation });
 
   if (items.length === 0) {
-    wordsList.innerHTML = '<div class="words-empty">Nic neodpovídá filtru.</div>';
+    wordsList.innerHTML = `<div class="words-empty">${t('words.noFilter')}</div>`;
     return;
   }
 
@@ -1514,11 +1638,12 @@ function renderWords() {
     const translation = document.createElement('span');
     translation.className = 'word-row__translation';
     const translationText = String(item.translation || '').trim();
-    translation.textContent = translationText || 'Bez překladu';
+    translation.textContent = translationText || t('words.noTranslationLabel');
     if (!translationText) {
       translation.classList.add('word-row__translation--empty');
     } else {
       enableWordTranslationEditing(translation, item, row);
+      translation.title = t('words.editTranslation');
     }
 
     main.append(term, translation);
@@ -1535,13 +1660,13 @@ function renderWords() {
     const statusLabel = formatStatus(item.status);
     status.className = `word-row__status${statusLabel === 'K' ? ' word-row__status--known' : ''}`;
     status.textContent = statusLabel;
-    status.title = `Úroveň znalosti ${statusLabel}`;
+    status.title = t('words.levelAria', { level: statusLabel });
 
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'word-row__delete';
-    remove.setAttribute('aria-label', `Odstranit ${item.word || 'slovíčko'}`);
-    remove.title = 'Odstranit z LingQ i databáze';
+    remove.setAttribute('aria-label', t('words.deleteAria', { word: item.word || t('words.wordFallback') }));
+    remove.title = t('words.delete');
     remove.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6 2h4l.5 1H14v1.5H2V3h3.5L6 2zm1 3.5V12h1.5V5.5H7zm3 0V12h1.5V5.5H10zM3.5 4.5h9l-.7 9.2A1.5 1.5 0 0 1 10.3 15H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 4.5z"/></svg>';
     remove.addEventListener('click', () => {
       deleteWord(item, row, remove);
@@ -1555,7 +1680,7 @@ function renderWords() {
 
 function enableWordTranslationEditing(element, item, row) {
   element.classList.add('word-row__translation--editable');
-  element.title = 'Kliknutím upravíte překlad';
+  element.title = t('words.editTranslation');
   element.setAttribute('role', 'button');
   element.tabIndex = 0;
 
@@ -1568,7 +1693,7 @@ function enableWordTranslationEditing(element, item, row) {
     input.type = 'text';
     input.className = 'word-row__translation-input';
     input.value = current;
-    input.setAttribute('aria-label', `Překlad pro ${item.word || 'slovíčko'}`);
+    input.setAttribute('aria-label', t('words.translationFor', { word: item.word || t('words.wordFallback') }));
     input.spellcheck = true;
 
     row.classList.add('word-row--editing');
@@ -1631,7 +1756,7 @@ function saveWordTranslation(item, row, element, input, previous, next) {
       input.disabled = false;
       input.replaceWith(element);
       element.textContent = previous;
-      window.alert(response?.error || chrome.runtime.lastError?.message || 'Překlad se nepodařilo uložit.');
+      window.alert(response?.error || chrome.runtime.lastError?.message || t('words.saveTranslationFailed'));
       return;
     }
 
@@ -1663,7 +1788,7 @@ function deleteWord(item, row, button) {
   if (!word) {
     return;
   }
-  if (!window.confirm(`Odstranit „${word}“ z LingQ i z databáze?`)) {
+  if (!window.confirm(t('words.confirmDelete', { word }))) {
     return;
   }
 
@@ -1678,14 +1803,14 @@ function deleteWord(item, row, button) {
     if (chrome.runtime.lastError || !response?.ok) {
       button.disabled = false;
       row.classList.remove('word-row--deleting');
-      window.alert(response?.error || chrome.runtime.lastError?.message || 'Slovíčko se nepodařilo odstranit.');
+      window.alert(response?.error || chrome.runtime.lastError?.message || t('words.deleteFailed'));
       return;
     }
 
     if (!response.lingqDeleted || !response.dbDeleted) {
       button.disabled = false;
       row.classList.remove('word-row--deleting');
-      window.alert('Slovíčko se nepodařilo úplně odstranit z LingQ i databáze.');
+      window.alert(t('words.deletePartial'));
       return;
     }
 
@@ -1725,7 +1850,7 @@ function loadStats(force) {
 
   statsLoading = true;
   updateStatsYearControls();
-  statsMeta.textContent = 'Načítám statistiky…';
+  statsMeta.textContent = t('stats.loading');
   statsHeatmap.innerHTML = '';
   statsTableBody.innerHTML = '';
 
@@ -1734,7 +1859,7 @@ function loadStats(force) {
     if (chrome.runtime.lastError || !response?.ok) {
       statsHeatmap.dataset.loaded = '';
       statsMeta.textContent = '';
-      statsHeatmap.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || 'Statistiky se nepodařilo načíst.'}</div>`;
+      statsHeatmap.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('stats.loadError')}</div>`;
       return;
     }
     statsHeatmap.dataset.loaded = period;
@@ -1759,7 +1884,7 @@ function loadLatency(force) {
   }
 
   latencyLoading = true;
-  latencyMeta.textContent = 'Načítám odezvu…';
+  latencyMeta.textContent = t('latency.loading');
   latencyChart.innerHTML = '';
   latencyTableBody.innerHTML = '';
 
@@ -1768,7 +1893,7 @@ function loadLatency(force) {
     if (chrome.runtime.lastError || !response?.ok) {
       latencyLoaded = false;
       latencyMeta.textContent = '';
-      latencyChart.innerHTML = `<div class="latency-chart__empty">${response?.error || chrome.runtime.lastError?.message || 'Odezvu se nepodařilo načíst.'}</div>`;
+      latencyChart.innerHTML = `<div class="latency-chart__empty">${response?.error || chrome.runtime.lastError?.message || t('err.latencyLoad')}</div>`;
       return;
     }
     latencyLoaded = true;
@@ -1795,23 +1920,37 @@ function renderStats(stats) {
     .map((day) => ({ day, clicks: daysMap.get(day) || 0 }))
     .sort((a, b) => b.clicks - a.clicks)[0];
 
-  statsMeta.textContent = `${formatShortDate(rangeStart)} – ${formatShortDate(rangeEnd)} · ${clicks} kliknutí`;
+  statsMeta.textContent = t('stats.clicks', {
+    from: formatShortDate(rangeStart),
+    to: formatShortDate(rangeEnd),
+    n: formatKnownCount(clicks),
+  });
   renderMonthCalendars(statsYear, rangeStart, rangeEnd, daysMap, maxClicks);
 
+  const avgText = avg
+    ? new Intl.NumberFormat(uiDateLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(avg)
+    : '0';
+  const topDayText = top && top.clicks
+    ? t('stats.row.topDayValue', {
+      date: formatShortDate(new Date(`${top.day}T12:00:00`)),
+      n: formatKnownCount(top.clicks),
+    })
+    : '—';
+
   const rows = [
-    ['Kliknutí v roce', String(clicks)],
-    ['Překlady vět', String(Number(stats.phrases) || 0)],
-    ['Aktivní dny', String(activeDays)],
-    ['Průměr kliknutí / aktivní den', avg ? avg.toFixed(1).replace('.', ',') : '0'],
-    ['Nejaktivnější den', top && top.clicks ? `${formatShortDate(new Date(`${top.day}T12:00:00`))} (${top.clicks}×)` : '—'],
-    ['Přidáno slovíček', String(Number(stats.added) || 0)],
-    ['Upraveno slovíček', String(Number(stats.edited) || 0)],
-    ['Celkem slovíček ve slovníku', String(Number(stats.total_words) || 0)],
-    ['Znalost 1', String(Number(stats.status_1) || 0)],
-    ['Znalost 2', String(Number(stats.status_2) || 0)],
-    ['Znalost 3', String(Number(stats.status_3) || 0)],
-    ['Znalost 4', String(Number(stats.status_4) || 0)],
-    ['Znalost K', String(Number(stats.status_5) || 0)],
+    [t('stats.row.clicksYear'), formatKnownCount(clicks)],
+    [t('stats.row.phrases'), formatKnownCount(stats.phrases)],
+    [t('stats.row.activeDays'), formatKnownCount(activeDays)],
+    [t('stats.row.avgClicks'), avgText],
+    [t('stats.row.topDay'), topDayText],
+    [t('stats.row.added'), formatKnownCount(stats.added)],
+    [t('stats.row.edited'), formatKnownCount(stats.edited)],
+    [t('stats.row.totalWords'), formatKnownCount(stats.total_words)],
+    [t('words.statusN', { n: 1 }), formatKnownCount(stats.status_1)],
+    [t('words.statusN', { n: 2 }), formatKnownCount(stats.status_2)],
+    [t('words.statusN', { n: 3 }), formatKnownCount(stats.status_3)],
+    [t('words.statusN', { n: 4 }), formatKnownCount(stats.status_4)],
+    [t('words.statusK'), formatKnownCount(stats.status_5)],
   ];
 
   fillStatsTable(statsTableBody, rows);
@@ -1827,9 +1966,14 @@ function renderLatency(latency) {
 
   const weekStart = latency.week?.from ? new Date(latency.week.from) : null;
   const weekEnd = latency.week?.to ? new Date(latency.week.to) : null;
+  const count = formatKnownCount(latency.count);
   latencyMeta.textContent = weekStart && weekEnd
-    ? `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)} · ${Number(latency.count) || 0} měření`
-    : `${Number(latency.count) || 0} měření`;
+    ? t('latency.meta', {
+      from: formatShortDate(weekStart),
+      to: formatShortDate(weekEnd),
+      n: count,
+    })
+    : t('latency.metaCount', { n: count });
 
   fillStatsTable(latencyTableBody, latencyRows(latency));
   requestAnimationFrame(() => {
@@ -1878,12 +2022,12 @@ function renderMonthCalendars(year, rangeStart, rangeEnd, daysMap, maxClicks) {
 
     const title = document.createElement('h3');
     title.className = 'month-card__title';
-    title.textContent = new Intl.DateTimeFormat('cs-CZ', { month: 'long' }).format(new Date(monthYear, month, 1));
+    title.textContent = new Intl.DateTimeFormat(uiDateLocale(), { month: 'long' }).format(new Date(monthYear, month, 1));
     card.appendChild(title);
 
     const weekdays = document.createElement('div');
     weekdays.className = 'month-card__weekdays';
-    WEEKDAY_LABELS.forEach((label, index) => {
+    weekdayLabels().forEach((label, index) => {
       const mark = document.createElement('span');
       mark.textContent = label;
       if (index === 6) {
@@ -1916,11 +2060,11 @@ function renderMonthCalendars(year, rangeStart, rangeEnd, daysMap, maxClicks) {
       if (inRange) {
         cell.type = 'button';
         cell.className = `heat heat-${heatLevel(count, maxClicks)}`;
-        cell.title = `${formatShortDate(date)}: ${count}×`;
+        cell.title = t('stats.dayClicks', { date: formatShortDate(date), n: formatKnownCount(count) });
         cell.setAttribute('aria-label', cell.title);
       } else {
         cell.className = 'heat heat-out';
-        cell.title = `${formatShortDate(date)} (mimo období)`;
+        cell.title = t('stats.outOfRange', { date: formatShortDate(date) });
       }
 
       if (date.getDay() === 0) {
@@ -1974,7 +2118,7 @@ function formatShortDate(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     return '—';
   }
-  return new Intl.DateTimeFormat('cs-CZ', {
+  return new Intl.DateTimeFormat(uiDateLocale(), {
     day: 'numeric',
     month: 'numeric',
     year: 'numeric',

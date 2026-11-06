@@ -5,6 +5,22 @@ const statusDot = document.getElementById('status-dot');
 const openAppButton = document.getElementById('open-app');
 const themeDarkInput = document.getElementById('theme-dark');
 const themeDescription = document.getElementById('theme-description');
+const uiLocaleInput = document.getElementById('ui-locale');
+
+function t(key, vars) {
+  return window.LingqI18n ? LingqI18n.t(key, vars) : key;
+}
+
+function refreshPopupTexts() {
+  if (window.LingqI18n) {
+    LingqI18n.apply();
+  }
+  renderStatus(enabledInput.checked);
+  renderTheme(themeDarkInput.checked ? 'dark' : 'light', { skipApply: true });
+  if (uiLocaleInput) {
+    uiLocaleInput.value = LingqI18n.getLocale();
+  }
+}
 
 LingqTheme.load((theme) => {
   renderTheme(theme);
@@ -12,6 +28,14 @@ LingqTheme.load((theme) => {
 
 LingqTheme.watch((theme) => {
   renderTheme(theme);
+});
+
+LingqI18n.load(() => {
+  refreshPopupTexts();
+});
+
+LingqI18n.watch(() => {
+  refreshPopupTexts();
 });
 
 chrome.storage.sync.get({ enabled: true }, (settings) => {
@@ -27,7 +51,13 @@ enabledInput.addEventListener('change', () => {
 
 themeDarkInput.addEventListener('change', () => {
   const theme = themeDarkInput.checked ? 'dark' : 'light';
-  LingqTheme.save(theme, renderTheme);
+  LingqTheme.save(theme, (next) => renderTheme(next));
+});
+
+uiLocaleInput.addEventListener('change', () => {
+  LingqI18n.save(uiLocaleInput.value, () => {
+    refreshPopupTexts();
+  });
 });
 
 openAppButton.addEventListener('click', () => {
@@ -37,17 +67,16 @@ openAppButton.addEventListener('click', () => {
 });
 
 function renderStatus(enabled) {
-  statusTitle.textContent = enabled ? 'Doplněk je aktivní' : 'Doplněk je vypnutý';
-  statusDescription.textContent = enabled
-    ? 'Funguje na všech webových stránkách'
-    : 'Překlady po kliknutí jsou pozastavené';
+  statusTitle.textContent = enabled ? t('popup.status.onTitle') : t('popup.status.offTitle');
+  statusDescription.textContent = enabled ? t('popup.status.onDesc') : t('popup.status.offDesc');
   statusDot.classList.toggle('is-off', !enabled);
 }
 
-function renderTheme(theme) {
+function renderTheme(theme, options = {}) {
   const next = LingqTheme.apply(theme);
   themeDarkInput.checked = next === 'dark';
-  themeDescription.textContent = next === 'dark'
-    ? 'Tmavý vzhled doplňku'
-    : 'Světlý vzhled doplňku';
+  if (!options.skipApply && window.LingqI18n) {
+    // keep static labels; only description changes with theme
+  }
+  themeDescription.textContent = next === 'dark' ? t('popup.themeDark') : t('popup.themeLight');
 }
