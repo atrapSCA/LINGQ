@@ -3,6 +3,7 @@ const DEFAULTS = {
   language: 'en',
   targetLanguage: 'cs',
   enabled: true,
+  theme: 'light',
   clickCount: 1,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,
@@ -116,6 +117,11 @@ let supabaseSchemaNeedsUpdate = false;
 const schemaAlert = document.getElementById('schema-alert');
 const schemaAlertText = document.getElementById('schema-alert-text');
 const schemaAlertOpenSettings = document.getElementById('schema-alert-open-settings');
+
+if (window.LingqTheme) {
+  LingqTheme.load();
+  LingqTheme.watch();
+}
 
 chrome.runtime.sendMessage({ type: 'APP_OPENED' }, () => {
   void chrome.runtime.lastError;
@@ -891,9 +897,9 @@ function renderLatencyWeekChart(week) {
     return;
   }
 
-  const width = 600;
+  const width = Math.max(640, Math.round(latencyChart.clientWidth) || 1060);
   const height = 168;
-  const pad = { top: 12, right: 12, bottom: 28, left: 52 };
+  const pad = { top: 12, right: 14, bottom: 28, left: 52 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const points = [...clickHourly, ...idleHourly, ...phraseHourly];
@@ -1758,8 +1764,10 @@ function renderLatency(latency) {
     ? `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)} · ${Number(latency.count) || 0} měření`
     : `${Number(latency.count) || 0} měření`;
 
-  renderLatencyWeekChart(latency.week);
   fillStatsTable(latencyTableBody, latencyRows(latency));
+  requestAnimationFrame(() => {
+    renderLatencyWeekChart(latency.week);
+  });
 }
 
 function fillStatsTable(body, rows) {

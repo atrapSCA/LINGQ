@@ -5,6 +5,7 @@ const DEFAULTS = {
   language: 'en',
   targetLanguage: 'cs',
   enabled: true,
+  theme: 'light',
   clickCount: 1,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,

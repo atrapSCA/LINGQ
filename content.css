@@ -376,3 +376,119 @@
   color: #ffd6cc;
   font-weight: 500;
 }
+
+/* Světlé schéma bubliny (výchozí theme=light) */
+#lingq-click-translator-tooltip[data-theme="light"] {
+  border: 1px solid #d8e4df;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(24, 34, 43, 0.16);
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__word {
+  color: #1f7f68;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__views {
+  color: #6b7b80;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__translation--editable:hover {
+  box-shadow: inset 0 -1px 0 rgba(31, 127, 104, 0.45);
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__translation--editing {
+  outline: 2px solid #4dbea0;
+  background: #eef6f3;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__levels {
+  border-top-color: #e4eeea;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level {
+  border-color: #c9d6d2;
+  color: #294049;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level:hover:not(:disabled) {
+  border-color: #1f7f68;
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--active {
+  border-color: #4dbea0;
+  background: #4dbea0;
+  color: #102c2c;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known {
+  border-color: #d4a017;
+  color: #8a5a00;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known.lingq-level--active,
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known:hover:not(:disabled) {
+  border-color: #f0b84e;
+  background: #f0b84e;
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternatives {
+  color: #1f6f8b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternatives:hover {
+  color: #155a70;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternative-list {
+  border-top-color: #e4eeea;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternative {
+  color: #294049;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternative--empty {
+  color: #8a9aa0;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__message {
+  color: #6b7b80;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__close {
+  color: #8a9aa0;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__close:hover {
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__sentence {
+  color: #18222b;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__phrase-translation {
+  color: #1f7f68;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--phrase-loading .lingq-tooltip__phrase-translation,
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--phrase-error .lingq-tooltip__phrase-translation,
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--loading .lingq-tooltip__translation {
+  color: #6b7b80;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--phrase-external .lingq-tooltip__phrase-translation {
+  color: #8a5a00;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--error {
+  border-color: #f0b0a0;
+  background: #fff5f2;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--error .lingq-tooltip__translation {
+  color: #a33b3b;
+}

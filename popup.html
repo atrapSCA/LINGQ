@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="cs">
+<html lang="cs" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LingQ Click Translator</title>
+    <link rel="stylesheet" href="theme.css" />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -28,11 +29,23 @@
         </label>
       </div>
 
+      <div class="theme-card">
+        <div>
+          <strong id="theme-title">Tmavé rozhraní</strong>
+          <span id="theme-description">Světlý vzhled doplňku</span>
+        </div>
+        <label class="switch" title="Přepnout světlé / tmavé rozhraní">
+          <input type="checkbox" id="theme-dark" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
       <button type="button" class="open-app-button" id="open-app">
         Otevřít doplněk
       </button>
       <p class="mini__hint">Slovník, Import, Statistiky, Nastavení a Návod se otevřou na celé stránce.</p>
     </main>
+    <script src="theme.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -6,15 +6,34 @@ let enabled = true;
 let clickCount = 1;
 let sourceLanguage = 'en';
 let targetLanguage = 'cs';
+let uiTheme = 'light';
 let activeRequest = 0;
 let phraseSelectionActive = false;
 let tooltip;
 
-chrome.storage.sync.get({ enabled: true, clickCount: 1, language: 'en', targetLanguage: 'cs' }, (settings) => {
+function normalizeUiTheme(value) {
+  return value === 'dark' ? 'dark' : 'light';
+}
+
+function applyTooltipTheme() {
+  if (tooltip) {
+    tooltip.dataset.theme = uiTheme;
+  }
+}
+
+chrome.storage.sync.get({
+  enabled: true,
+  clickCount: 1,
+  language: 'en',
+  targetLanguage: 'cs',
+  theme: 'light',
+}, (settings) => {
   enabled = settings.enabled;
   clickCount = Number(settings.clickCount) === 2 ? 2 : 1;
   sourceLanguage = settings.language || 'en';
   targetLanguage = settings.targetLanguage || 'cs';
+  uiTheme = normalizeUiTheme(settings.theme);
+  applyTooltipTheme();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -32,6 +51,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.targetLanguage) {
     targetLanguage = changes.targetLanguage.newValue || 'cs';
+  }
+  if (changes.theme) {
+    uiTheme = normalizeUiTheme(changes.theme.newValue);
+    applyTooltipTheme();
   }
 });
 
@@ -188,6 +211,7 @@ function showPhraseTooltip(sentence, rect, translation, state) {
     document.documentElement.appendChild(tooltip);
   }
 
+  applyTooltipTheme();
   const canCopyTranslation = state === 'ready';
   tooltip.className = `lingq-tooltip lingq-tooltip--phrase lingq-tooltip--phrase-${state}`;
   tooltip.dataset.sentence = sentence;
@@ -378,6 +402,7 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
     document.documentElement.appendChild(tooltip);
   }
 
+  applyTooltipTheme();
   tooltip.className = `lingq-tooltip lingq-tooltip--${kind}`;
   tooltip.dataset.word = word;
   tooltip.dataset.translation = kind === 'loading' || kind === 'error' ? '' : translation;

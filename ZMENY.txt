@@ -277,6 +277,12 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.1
+6. 11. 2026 21:55
+- Stabilní release: světlé/tmavé rozhraní s přepínačem v mini popup u ikony.
+- Theme se propsíše do celé stránky doplňku i do bubliny slovíčka/věty.
+- Graf odezvy přes celou šířku panelu (~1100 px).
+
 Verze 0.3.0
 6. 11. 2026 21:35
 - Stabilní release: plná stránka app.html + mini popup; režim bez LingQ; úpravy slovníku a bubliny; hodinový graf odezvy.
