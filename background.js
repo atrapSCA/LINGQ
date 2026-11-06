@@ -15,6 +15,7 @@ const DEFAULTS = {
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
+  phraseTranslationSource: 'lingq',
   lingqEnabled: true,
   supabaseEnabled: true,
   supabaseUrl: '',
@@ -1177,6 +1178,13 @@ function toApiStatus(status) {
   return { apiStatus, body };
 }
 
+function wantsChatgptPhraseTranslation(settings) {
+  if (!isLingqEnabled(settings)) {
+    return true;
+  }
+  return settings.phraseTranslationSource === 'chatgpt';
+}
+
 async function translatePhrase(text) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const phrase = String(text || '').replace(/\s+/g, ' ').trim();
@@ -1184,9 +1192,12 @@ async function translatePhrase(text) {
     throw new Error('Vyberte větu.');
   }
 
-  if (!isLingqEnabled(settings)) {
-    if (!canUseOfflineMode(settings)) {
+  if (wantsChatgptPhraseTranslation(settings)) {
+    if (!isLingqEnabled(settings) && !canUseOfflineMode(settings)) {
       throw new Error('Bez LingQ je potřeba připravená Supabase DB a platný ChatGPT API klíč.');
+    }
+    if (!settings.chatgptEnabled || !String(settings.chatgptApiKey || '').trim()) {
+      throw new Error('Pro překlad vět přes ChatGPT zadejte platný ChatGPT API klíč.');
     }
     const translation = await fetchChatgptPhraseTranslation(phrase, settings);
     return { sentence: phrase, translation };

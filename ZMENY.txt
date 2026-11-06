@@ -277,6 +277,12 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.2
+6. 11. 2026 22:05
+- Stabilní release: překlad vět přes ChatGPT v Nastavení; limit 10 slov jen v user verzi u LingQ.
+- Volba „Překládat věty přes“ LingQ / ChatGPT (u zdrojů překladu při platném ChatGPT klíči).
+- ChatGPT překládá věty bez limitu délky; u LingQ platí limit 10 slov pouze v user buildu (admin bez limitu).
+
 Verze 0.3.1
 6. 11. 2026 21:55
 - Stabilní release: světlé/tmavé rozhraní s přepínačem v mini popup u ikony.

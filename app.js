@@ -13,6 +13,7 @@ const DEFAULTS = {
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
+  phraseTranslationSource: 'lingq',
   lingqEnabled: true,
   supabaseEnabled: true,
   supabaseUrl: '',
@@ -47,6 +48,9 @@ const newWordSourceHelp = document.getElementById('new-word-source-help');
 const alternativesSourceInput = document.getElementById('alternatives-source');
 const alternativesSourceChatgptOption = document.getElementById('alternatives-source-chatgpt');
 const alternativesSourceHelp = document.getElementById('alternatives-source-help');
+const phraseSourceInput = document.getElementById('phrase-source');
+const phraseSourceChatgptOption = document.getElementById('phrase-source-chatgpt');
+const phraseSourceHelp = document.getElementById('phrase-source-help');
 const chatgptModelInput = document.getElementById('chatgpt-model');
 const chatgptModelHelp = document.getElementById('chatgpt-model-help');
 const languageInput = document.getElementById('language');
@@ -199,6 +203,7 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   updateChatgptDependentAvailability({
     alternativesSource: settings.alternativesSource === 'chatgpt' ? 'chatgpt' : 'lingq',
     newWordTranslationSource: settings.newWordTranslationSource === 'chatgpt' ? 'chatgpt' : 'lingq',
+    phraseTranslationSource: settings.phraseTranslationSource === 'chatgpt' ? 'chatgpt' : 'lingq',
   });
   if (chatgptEnabledInput.checked && chatgptApiKeyInput.value.trim()) {
     validateChatgptApiKey(chatgptApiKeyInput.value.trim(), { quiet: chatgptApiKeyValid });
@@ -235,9 +240,12 @@ form.addEventListener('submit', async (event) => {
   const newWordTranslationSource = offlineOnly || (chatgptEnabled && valid && newWordSourceInput.value === 'chatgpt')
     ? 'chatgpt'
     : 'lingq';
+  const phraseTranslationSource = offlineOnly || (chatgptEnabled && valid && phraseSourceInput.value === 'chatgpt')
+    ? 'chatgpt'
+    : 'lingq';
   applyOptionalFeatureUi();
   updateLingqAvailability();
-  updateChatgptDependentAvailability({ alternativesSource, newWordTranslationSource });
+  updateChatgptDependentAvailability({ alternativesSource, newWordTranslationSource, phraseTranslationSource });
   chrome.storage.sync.set({
     apiKey: apiKeyInput.value.trim(),
     lingqEnabled,
@@ -247,6 +255,7 @@ form.addEventListener('submit', async (event) => {
     chatgptModel: resolveChatgptModel(chatgptModelInput.value),
     alternativesSource,
     newWordTranslationSource,
+    phraseTranslationSource,
     language: languageInput.value,
     targetLanguage: targetLanguageInput.value,
     supabaseEnabled,
@@ -275,11 +284,16 @@ chatgptEnabledInput.addEventListener('change', () => {
       chrome.storage.sync.set({ lingqEnabled: true });
     }
     updateLingqAvailability();
-    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+    updateChatgptDependentAvailability({
+      alternativesSource: 'lingq',
+      newWordTranslationSource: 'lingq',
+      phraseTranslationSource: 'lingq',
+    });
     chrome.storage.sync.set({
       chatgptEnabled: false,
       alternativesSource: 'lingq',
       newWordTranslationSource: 'lingq',
+      phraseTranslationSource: 'lingq',
     });
     return;
   }
@@ -288,7 +302,11 @@ chatgptEnabledInput.addEventListener('change', () => {
   if (chatgptApiKeyInput.value.trim()) {
     validateChatgptApiKey(chatgptApiKeyInput.value.trim());
   } else {
-    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+    updateChatgptDependentAvailability({
+      alternativesSource: 'lingq',
+      newWordTranslationSource: 'lingq',
+      phraseTranslationSource: 'lingq',
+    });
   }
 });
 
@@ -321,8 +339,13 @@ lingqEnabledInput.addEventListener('change', () => {
       lingqEnabled: false,
       alternativesSource: 'chatgpt',
       newWordTranslationSource: 'chatgpt',
+      phraseTranslationSource: 'chatgpt',
     });
-    updateChatgptDependentAvailability({ alternativesSource: 'chatgpt', newWordTranslationSource: 'chatgpt' });
+    updateChatgptDependentAvailability({
+      alternativesSource: 'chatgpt',
+      newWordTranslationSource: 'chatgpt',
+      phraseTranslationSource: 'chatgpt',
+    });
     return;
   }
   chrome.storage.sync.set({ lingqEnabled: true }, () => {
@@ -389,9 +412,23 @@ alternativesSourceInput.addEventListener('change', () => {
   });
 });
 
+phraseSourceInput.addEventListener('change', () => {
+  if (!chatgptApiKeyValid && phraseSourceInput.value === 'chatgpt') {
+    updateChatgptDependentAvailability({ phraseTranslationSource: 'lingq' });
+    return;
+  }
+  const phraseTranslationSource = phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
+  updatePhraseSourceHelp(phraseTranslationSource);
+  chrome.storage.sync.set({ phraseTranslationSource });
+});
+
 chatgptModelInput.addEventListener('change', () => {
   if (!chatgptApiKeyValid) {
-    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+    updateChatgptDependentAvailability({
+      alternativesSource: 'lingq',
+      newWordTranslationSource: 'lingq',
+      phraseTranslationSource: 'lingq',
+    });
     return;
   }
   const chatgptModel = resolveChatgptModel(chatgptModelInput.value);
@@ -403,12 +440,14 @@ chatgptApiKeyInput.addEventListener('change', () => {
   validateChatgptApiKey(chatgptApiKeyInput.value.trim()).then((valid) => {
     const alternativesSource = valid && alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
     const newWordTranslationSource = valid && newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
+    const phraseTranslationSource = valid && phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
     chrome.storage.sync.set({
       chatgptApiKey: chatgptApiKeyInput.value.trim(),
       chatgptApiKeyValid: valid,
       chatgptModel: resolveChatgptModel(chatgptModelInput.value),
       alternativesSource,
       newWordTranslationSource,
+      phraseTranslationSource,
     });
   });
 });
@@ -546,6 +585,7 @@ function updateChatgptDependentAvailability(preferences = {}) {
   const available = chatgptOn && chatgptApiKeyValid === true;
   const preferredAlternatives = preferences.alternativesSource ?? alternativesSourceInput.value;
   const preferredNewWord = preferences.newWordTranslationSource ?? newWordSourceInput.value;
+  const preferredPhrase = preferences.phraseTranslationSource ?? phraseSourceInput.value;
   const wasHidden = Boolean(translationSourceBlock?.hidden);
 
   if (translationSourceBlock) {
@@ -562,6 +602,7 @@ function updateChatgptDependentAvailability(preferences = {}) {
     // Bez zapnutého ChatGPT / platného klíče volby skryté — používá se LingQ (nebo ChatGPT, když je LingQ vypnuté).
     newWordSourceInput.value = lingqOn ? 'lingq' : 'chatgpt';
     alternativesSourceInput.value = lingqOn ? 'lingq' : 'chatgpt';
+    phraseSourceInput.value = lingqOn ? 'lingq' : 'chatgpt';
     chatgptModelHelp.textContent = chatgptOn
       ? 'Model lze zvolit až po ověření ChatGPT API klíče. Ceny jsou za 1 milion tokenů (vstup / výstup).'
       : 'Zapněte ChatGPT a vyplňte platný klíč, pokud chcete volit model.';
@@ -570,23 +611,40 @@ function updateChatgptDependentAvailability(preferences = {}) {
 
   newWordSourceChatgptOption.disabled = false;
   alternativesSourceChatgptOption.disabled = false;
+  phraseSourceChatgptOption.disabled = false;
   newWordSourceInput.disabled = !lingqOn;
   alternativesSourceInput.disabled = !lingqOn;
+  phraseSourceInput.disabled = !lingqOn;
 
   if (!lingqOn) {
     newWordSourceInput.value = 'chatgpt';
     alternativesSourceInput.value = 'chatgpt';
+    phraseSourceInput.value = 'chatgpt';
     newWordSourceHelp.textContent = 'LingQ je vypnuté — nová slovíčka překládá ChatGPT do databáze.';
     alternativesSourceHelp.textContent = 'LingQ je vypnuté — další překlady jdou přes ChatGPT.';
+    phraseSourceHelp.textContent = 'LingQ je vypnuté — věty překládá ChatGPT bez limitu délky.';
     chatgptModelHelp.textContent = 'Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI.';
     return;
   }
 
   newWordSourceInput.value = preferredNewWord === 'chatgpt' ? 'chatgpt' : 'lingq';
   alternativesSourceInput.value = preferredAlternatives === 'chatgpt' ? 'chatgpt' : 'lingq';
+  phraseSourceInput.value = preferredPhrase === 'chatgpt' ? 'chatgpt' : 'lingq';
   newWordSourceHelp.textContent = 'Slovíčka, která ještě nejsou v LingQ. Po překladu se karta v LingQ stejně založí.';
   alternativesSourceHelp.textContent = 'Zdroj sekce „Další překlady“ ve vyskakovací bublině. ChatGPT se volá až po kliknutí na tlačítko.';
+  updatePhraseSourceHelp(phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq');
   chatgptModelHelp.textContent = 'Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI. Výchozí je gpt-5-nano.';
+}
+
+function updatePhraseSourceHelp(source) {
+  if (!phraseSourceHelp) {
+    return;
+  }
+  if (source === 'chatgpt') {
+    phraseSourceHelp.textContent = 'ChatGPT překládá věty bez limitu délky. V user verzi by u LingQ platil limit 10 slov.';
+    return;
+  }
+  phraseSourceHelp.textContent = 'V user verzi je při překladu přes LingQ výběr omezen na 10 slov; delší text otevře překladač. ChatGPT (i admin u LingQ) délku neomezuje.';
 }
 
 function validateChatgptApiKey(apiKey, options = {}) {
@@ -597,7 +655,11 @@ function validateChatgptApiKey(apiKey, options = {}) {
     if (!options.quiet) {
       setChatgptKeyStatus('Bez API klíče nelze použít ChatGPT pro překlady.', 'warn');
     }
-    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+    updateChatgptDependentAvailability({
+      alternativesSource: 'lingq',
+      newWordTranslationSource: 'lingq',
+      phraseTranslationSource: 'lingq',
+    });
     return Promise.resolve(false);
   }
 
@@ -614,7 +676,11 @@ function validateChatgptApiKey(apiKey, options = {}) {
       if (chrome.runtime.lastError || !response?.ok) {
         chatgptApiKeyValid = false;
         setChatgptKeyStatus(response?.error || chrome.runtime.lastError?.message || 'ChatGPT API klíč se nepodařilo ověřit.', 'error');
-        updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+        updateChatgptDependentAvailability({
+          alternativesSource: 'lingq',
+          newWordTranslationSource: 'lingq',
+          phraseTranslationSource: 'lingq',
+        });
         updateLingqAvailability();
         resolve(false);
         return;
@@ -624,6 +690,7 @@ function validateChatgptApiKey(apiKey, options = {}) {
       updateChatgptDependentAvailability({
         alternativesSource: alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq',
         newWordTranslationSource: newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq',
+        phraseTranslationSource: phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq',
       });
       updateLingqAvailability();
       resolve(true);

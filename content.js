@@ -7,6 +7,7 @@ let clickCount = 1;
 let sourceLanguage = 'en';
 let targetLanguage = 'cs';
 let uiTheme = 'light';
+let phraseTranslationSource = 'lingq';
 let activeRequest = 0;
 let phraseSelectionActive = false;
 let tooltip;
@@ -21,18 +22,27 @@ function applyTooltipTheme() {
   }
 }
 
+function normalizePhraseSource(value) {
+  return value === 'chatgpt' ? 'chatgpt' : 'lingq';
+}
+
 chrome.storage.sync.get({
   enabled: true,
   clickCount: 1,
   language: 'en',
   targetLanguage: 'cs',
   theme: 'light',
+  phraseTranslationSource: 'lingq',
+  lingqEnabled: true,
 }, (settings) => {
   enabled = settings.enabled;
   clickCount = Number(settings.clickCount) === 2 ? 2 : 1;
   sourceLanguage = settings.language || 'en';
   targetLanguage = settings.targetLanguage || 'cs';
   uiTheme = normalizeUiTheme(settings.theme);
+  phraseTranslationSource = settings.lingqEnabled === false
+    ? 'chatgpt'
+    : normalizePhraseSource(settings.phraseTranslationSource);
   applyTooltipTheme();
 });
 
@@ -55,6 +65,16 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.theme) {
     uiTheme = normalizeUiTheme(changes.theme.newValue);
     applyTooltipTheme();
+  }
+  if (changes.phraseTranslationSource || changes.lingqEnabled) {
+    chrome.storage.sync.get({
+      phraseTranslationSource: 'lingq',
+      lingqEnabled: true,
+    }, (settings) => {
+      phraseTranslationSource = settings.lingqEnabled === false
+        ? 'chatgpt'
+        : normalizePhraseSource(settings.phraseTranslationSource);
+    });
   }
 });
 
@@ -94,8 +114,15 @@ function handlePhraseSelection(event) {
   }, 0);
 
   const isAdmin = typeof isAdminBuild === 'function' && isAdminBuild();
-  if (!isAdmin && selected.wordCount > USER_PHRASE_WORD_LIMIT) {
-    showPhraseTooltip(selected.text, selected.rect, `Výběr má ${selected.wordCount} slov (limit ${USER_PHRASE_WORD_LIMIT}). Otevřete překladač.`, 'external');
+  const phraseViaChatgpt = phraseTranslationSource === 'chatgpt';
+  // Limit 10 slov platí jen v user buildu při překladu přes LingQ.
+  if (!isAdmin && !phraseViaChatgpt && selected.wordCount > USER_PHRASE_WORD_LIMIT) {
+    showPhraseTooltip(
+      selected.text,
+      selected.rect,
+      `Výběr má ${selected.wordCount} slov. Při překladu přes LingQ je limit ${USER_PHRASE_WORD_LIMIT} slov. Otevřete překladač, nebo v Nastavení zvolte ChatGPT.`,
+      'external',
+    );
     return;
   }
 

@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 3,
   "name": "LingQ Click Translator (Admin)",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Click any word on any web page to look up or create a LingQ and see its translation as a tooltip.",
   "permissions": ["storage", "activeTab", "contextMenus", "alarms", "clipboardWrite"],
   "host_permissions": [
