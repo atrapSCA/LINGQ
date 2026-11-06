@@ -38,128 +38,162 @@
       </nav>
 
       <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-        <form id="settings-form">
-          <h2 class="settings-section__title">Běžné nastavení</h2>
+        <form id="settings-form" class="settings-form">
+          <div class="settings-form__body">
+          <section class="settings-section" aria-labelledby="settings-general-title">
+            <h2 class="settings-section__title" id="settings-general-title">Ostatní nastavení</h2>
 
-          <div class="field-grid">
-            <div>
-              <label for="language">Učím se</label>
-              <select id="language">
-                <option value="en">Angličtina</option>
-                <option value="de">Němčina</option>
-                <option value="es">Španělština</option>
-                <option value="fr">Francouzština</option>
-                <option value="it">Italština</option>
-                <option value="pt">Portugalština</option>
-                <option value="ru">Ruština</option>
-                <option value="pl">Polština</option>
-                <option value="ja">Japonština</option>
-                <option value="ko">Korejština</option>
-                <option value="zh">Čínština</option>
+            <div class="field-grid">
+              <div>
+                <label for="language">Učím se</label>
+                <select id="language">
+                  <option value="en">Angličtina</option>
+                  <option value="de">Němčina</option>
+                  <option value="es">Španělština</option>
+                  <option value="fr">Francouzština</option>
+                  <option value="it">Italština</option>
+                  <option value="pt">Portugalština</option>
+                  <option value="ru">Ruština</option>
+                  <option value="pl">Polština</option>
+                  <option value="ja">Japonština</option>
+                  <option value="ko">Korejština</option>
+                  <option value="zh">Čínština</option>
+                </select>
+              </div>
+              <div>
+                <label for="target-language">Překládat do</label>
+                <select id="target-language">
+                  <option value="cs">Čeština</option>
+                  <option value="en">Angličtina</option>
+                  <option value="de">Němčina</option>
+                  <option value="es">Španělština</option>
+                  <option value="fr">Francouzština</option>
+                  <option value="sk">Slovenština</option>
+                  <option value="pl">Polština</option>
+                </select>
+              </div>
+            </div>
+
+            <label for="click-count">Bublina vyskočí po</label>
+            <select id="click-count">
+              <option value="1">jednom kliknutí</option>
+              <option value="2">dvou kliknutích</option>
+            </select>
+            <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
+
+            <label for="api-key">LingQ API klíč</label>
+            <div class="input-wrap">
+              <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
+              <button type="button" id="toggle-key" aria-label="Zobrazit LingQ API klíč">Zobrazit</button>
+            </div>
+            <p class="help">API klíč získáte ve svém účtu LingQ v sekci <a href="https://www.lingq.com/en/accounts/apikey/" target="_blank" rel="noopener noreferrer">API key</a>.</p>
+
+            <div id="admin-idle-settings" hidden>
+              <p class="field-label">Sledovat odezvu po nečinnosti (sekundy) · admin</p>
+              <div class="field-grid field-grid--idle">
+                <div>
+                  <label for="latency-idle-min">Od</label>
+                  <input id="latency-idle-min" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+                </div>
+                <div>
+                  <label for="latency-idle-max">Do</label>
+                  <input id="latency-idle-max" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+                </div>
+              </div>
+              <p class="help">Jen admin build. Po nečinnosti se v tomto rozmezí náhodně zvolí čas a odešle kontrolní dotaz na LingQ API. Výchozí je 60–80 sekund. Nové karty se při kontrole nezakládají.</p>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="settings-chatgpt-title">
+            <div class="settings-section__header">
+              <h2 class="settings-section__title" id="settings-chatgpt-title">ChatGPT</h2>
+              <label class="switch" title="Zapnout ChatGPT">
+                <input type="checkbox" id="chatgpt-enabled" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <p class="settings-section__lead">Překlady a alternativy přes OpenAI API (placené)</p>
+
+            <div id="chatgpt-settings-block">
+              <label for="new-word-source">Nová slovíčka překládat přes</label>
+              <select id="new-word-source">
+                <option value="lingq">LingQ API</option>
+                <option value="chatgpt" id="new-word-source-chatgpt">ChatGPT</option>
               </select>
-            </div>
-            <div>
-              <label for="target-language">Překládat do</label>
-              <select id="target-language">
-                <option value="cs">Čeština</option>
-                <option value="en">Angličtina</option>
-                <option value="de">Němčina</option>
-                <option value="es">Španělština</option>
-                <option value="fr">Francouzština</option>
-                <option value="sk">Slovenština</option>
-                <option value="pl">Polština</option>
+              <p class="help" id="new-word-source-help">Slovíčka, která ještě nejsou v LingQ. Po překladu se karta v LingQ stejně založí. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
+
+              <label for="alternatives-source">Další překlady přes</label>
+              <select id="alternatives-source">
+                <option value="lingq">LingQ API</option>
+                <option value="chatgpt" id="alternatives-source-chatgpt">ChatGPT</option>
               </select>
+              <p class="help" id="alternatives-source-help">Zdroj sekce „Další překlady“ ve vyskakovací bublině. ChatGPT se volá až po kliknutí na tlačítko. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
+
+              <label for="chatgpt-model">Model ChatGPT</label>
+              <select id="chatgpt-model" disabled>
+                <option value="gpt-5-nano">gpt-5-nano — $0.05 / $0.40 za 1M tokenů</option>
+                <option value="gpt-4o-mini">gpt-4o-mini — $0.15 / $0.60 za 1M tokenů</option>
+                <option value="gpt-5.4-nano">gpt-5.4-nano — $0.20 / $1.25 za 1M tokenů</option>
+                <option value="gpt-5-mini">gpt-5-mini — $0.25 / $2.00 za 1M tokenů</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini — $0.40 / $1.60 za 1M tokenů</option>
+              </select>
+              <p class="help" id="chatgpt-model-help">Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI. Výchozí je gpt-5-nano.</p>
             </div>
-          </div>
 
-          <label for="click-count">Bublina vyskočí po</label>
-          <select id="click-count">
-            <option value="1">jednom kliknutí</option>
-            <option value="2">dvou kliknutích</option>
-          </select>
-          <p class="help" id="click-help">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
-
-          <label for="new-word-source">Nová slovíčka překládat přes</label>
-          <select id="new-word-source">
-            <option value="lingq">LingQ API</option>
-            <option value="chatgpt" id="new-word-source-chatgpt">ChatGPT</option>
-          </select>
-          <p class="help" id="new-word-source-help">Slovíčka, která ještě nejsou v LingQ. Po překladu se karta v LingQ stejně založí. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
-
-          <label for="alternatives-source">Další překlady přes</label>
-          <select id="alternatives-source">
-            <option value="lingq">LingQ API</option>
-            <option value="chatgpt" id="alternatives-source-chatgpt">ChatGPT</option>
-          </select>
-          <p class="help" id="alternatives-source-help">Zdroj sekce „Další překlady“ ve vyskakovací bublině. ChatGPT se volá až po kliknutí na tlačítko. Volba ChatGPT je dostupná jen s platným API klíčem.</p>
-
-          <label for="chatgpt-model">Model ChatGPT</label>
-          <select id="chatgpt-model" disabled>
-            <option value="gpt-5-nano">gpt-5-nano — $0.05 / $0.40 za 1M tokenů</option>
-            <option value="gpt-4o-mini">gpt-4o-mini — $0.15 / $0.60 za 1M tokenů</option>
-            <option value="gpt-5.4-nano">gpt-5.4-nano — $0.20 / $1.25 za 1M tokenů</option>
-            <option value="gpt-5-mini">gpt-5-mini — $0.25 / $2.00 za 1M tokenů</option>
-            <option value="gpt-4.1-mini">gpt-4.1-mini — $0.40 / $1.60 za 1M tokenů</option>
-          </select>
-          <p class="help" id="chatgpt-model-help">Ceny jsou za 1 milion tokenů (vstup / výstup) podle ceníku OpenAI. Výchozí je gpt-5-nano.</p>
-
-          <p class="field-label">Sledovat odezvu po nečinnosti (sekundy)</p>
-          <div class="field-grid field-grid--idle">
-            <div>
-              <label for="latency-idle-min">Od</label>
-              <input id="latency-idle-min" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+            <div id="chatgpt-key-block">
+              <label for="chatgpt-api-key">ChatGPT API klíč</label>
+              <div class="input-wrap">
+                <input id="chatgpt-api-key" type="password" placeholder="sk-…" autocomplete="off" />
+                <button type="button" id="toggle-chatgpt-key" aria-label="Zobrazit ChatGPT API klíč">Zobrazit</button>
+              </div>
+              <p class="help">API klíč získáte na <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com/api-keys</a> (placené). Postup je na záložce <strong>Návod</strong>.</p>
+              <p class="help" id="chatgpt-key-status" role="status"></p>
             </div>
-            <div>
-              <label for="latency-idle-max">Do</label>
-              <input id="latency-idle-max" type="number" min="30" max="3600" step="1" inputmode="numeric" />
+          </section>
+
+          <section class="settings-section" aria-labelledby="settings-supabase-title">
+            <div class="settings-section__header">
+              <h2 class="settings-section__title" id="settings-supabase-title">Supabase DB</h2>
+              <label class="switch" title="Zapnout Supabase DB">
+                <input type="checkbox" id="supabase-enabled" />
+                <span class="slider"></span>
+              </label>
             </div>
-          </div>
-          <p class="help">Po nečinnosti se v tomto rozmezí náhodně zvolí čas a odešle kontrolní dotaz. Po každém odeslání se vybere nový náhodný čas. Výchozí je 60–80 sekund. Nové karty se při kontrole nezakládají.</p>
+            <p class="settings-section__lead">Slovník, Import, Statistiky a Odezva</p>
 
-          <h2 class="settings-section__title">Klíče a databáze</h2>
+            <div id="supabase-settings-block">
+              <label for="supabase-url">Supabase URL</label>
+              <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+              <p class="help">Vlastní databáze slovíček (volitelné). Postup založení účtu a SQL je na záložce <strong>Návod</strong>. LingQ napojení se nemění.</p>
 
-          <label for="api-key">LingQ API klíč</label>
-          <div class="input-wrap">
-            <input id="api-key" type="password" placeholder="Vložte svůj API klíč" autocomplete="off" required />
-            <button type="button" id="toggle-key" aria-label="Zobrazit LingQ API klíč">Zobrazit</button>
-          </div>
-          <p class="help">API klíč získáte ve svém účtu LingQ v sekci <a href="https://www.lingq.com/en/accounts/apikey/" target="_blank" rel="noopener noreferrer">API key</a>.</p>
+              <label for="supabase-key">Supabase publishable klíč</label>
+              <div class="input-wrap">
+                <input id="supabase-key" type="password" placeholder="sb_publishable_…" autocomplete="off" />
+                <button type="button" id="toggle-supabase-key" aria-label="Zobrazit Supabase publishable klíč">Zobrazit</button>
+              </div>
+              <p class="help">Klíč <strong>anon / publishable</strong> z Project Settings → API (ne service_role).</p>
 
-          <label for="chatgpt-api-key">ChatGPT API klíč</label>
-          <div class="input-wrap">
-            <input id="chatgpt-api-key" type="password" placeholder="sk-…" autocomplete="off" />
-            <button type="button" id="toggle-chatgpt-key" aria-label="Zobrazit ChatGPT API klíč">Zobrazit</button>
-          </div>
-          <p class="help">API klíč získáte na <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com/api-keys</a> (placené). Postup je na záložce <strong>Návod</strong>.</p>
-          <p class="help" id="chatgpt-key-status" role="status"></p>
-
-          <label for="supabase-url">Supabase URL</label>
-          <input id="supabase-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
-          <p class="help">Vlastní databáze slovíček (volitelné). Postup založení účtu a SQL je na záložce <strong>Návod</strong>. LingQ napojení se nemění.</p>
-
-          <label for="supabase-key">Supabase publishable klíč</label>
-          <div class="input-wrap">
-            <input id="supabase-key" type="password" placeholder="sb_publishable_…" autocomplete="off" />
-            <button type="button" id="toggle-supabase-key" aria-label="Zobrazit Supabase publishable klíč">Zobrazit</button>
-          </div>
-          <p class="help">Klíč <strong>anon / publishable</strong> z Project Settings → API (ne service_role).</p>
-
-          <div class="db-install">
-            <button type="button" class="import-button" id="check-supabase-db">Zkontrolovat databázi</button>
-            <button type="button" class="import-button import-button--ghost" id="install-supabase-db">Nainstalovat / aktualizovat databázi</button>
-            <p class="help">Publishable klíč neumí spouštět SQL sám. Instalace zkontroluje strukturu; když něco chybí, zkopíruje aktuální SQL do schránky a otevře SQL Editor v Supabase — stačí vložit a Run. Pak znovu Zkontrolovat.</p>
-            <p class="db-install-status" id="supabase-db-status" role="status"></p>
+              <div class="db-install">
+                <button type="button" class="import-button" id="check-supabase-db">Zkontrolovat databázi</button>
+                <button type="button" class="import-button import-button--ghost" id="install-supabase-db">Nainstalovat / aktualizovat databázi</button>
+                <p class="help">Publishable klíč neumí spouštět SQL sám. Instalace zkontroluje strukturu; když něco chybí, zkopíruje aktuální SQL do schránky a otevře SQL Editor v Supabase — stačí vložit a Run. Pak znovu Zkontrolovat.</p>
+                <p class="db-install-status" id="supabase-db-status" role="status"></p>
+              </div>
+            </div>
+          </section>
           </div>
 
-          <button class="save-button" type="submit">Uložit nastavení</button>
-          <p class="form-message" id="form-message" role="status"></p>
+          <div class="settings-form__actions">
+            <button class="save-button" type="submit">Uložit nastavení</button>
+            <p class="form-message" id="form-message" role="status"></p>
+          </div>
         </form>
       </section>
 
       <section class="tab-panel" id="panel-words" role="tabpanel" aria-labelledby="tab-words">
         <div class="db-gate" data-db-gate hidden>
           <p class="db-gate__title">Slovník vyžaduje Supabase</p>
-          <p class="db-gate__text">Vyplňte URL a klíč v Nastavení, nainstalujte schéma a ověřte tlačítkem Zkontrolovat databázi.</p>
+          <p class="db-gate__text">Zapněte Supabase DB v Nastavení, vyplňte URL a klíč, nainstalujte schéma a ověřte tlačítkem Zkontrolovat databázi.</p>
         </div>
         <div class="words-toolbar">
           <label class="sr-only" for="word-search">Hledat slovíčko</label>
@@ -190,7 +224,7 @@
       <section class="tab-panel" id="panel-import" role="tabpanel" aria-labelledby="tab-import" hidden>
         <div class="db-gate" data-db-gate hidden>
           <p class="db-gate__title">Import vyžaduje Supabase</p>
-          <p class="db-gate__text">Bez připravené databáze nelze slovíčka z LingQ ukládat do DB. Nastavte Supabase v Nastavení a spusťte kontrolu.</p>
+          <p class="db-gate__text">Bez zapnuté a připravené databáze nelze slovíčka z LingQ ukládat do DB. Zapněte Supabase v Nastavení a spusťte kontrolu.</p>
         </div>
         <div class="words-import">
           <div class="import-progress" id="import-progress" hidden>
@@ -220,7 +254,7 @@
       <section class="tab-panel" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
         <div class="db-gate" data-db-gate hidden>
           <p class="db-gate__title">Statistiky vyžadují Supabase</p>
-          <p class="db-gate__text">Vyplňte údaje k databázi v Nastavení a ověřte, že schéma je nainstalované.</p>
+          <p class="db-gate__text">Zapněte Supabase DB v Nastavení, vyplňte údaje a ověřte, že schéma je nainstalované.</p>
         </div>
         <div class="stats-toolbar">
           <label class="sr-only" for="stats-period">Období</label>
@@ -253,7 +287,7 @@
       <section class="tab-panel" id="panel-latency" role="tabpanel" aria-labelledby="tab-latency" hidden>
         <div class="db-gate" data-db-gate hidden>
           <p class="db-gate__title">Odezva vyžaduje Supabase</p>
-          <p class="db-gate__text">Měření odezvy se ukládá do databáze. Nastavte Supabase a zkontrolujte instalaci schématu.</p>
+          <p class="db-gate__text">Měření odezvy se ukládá do databáze. Zapněte Supabase v Nastavení a zkontrolujte instalaci schématu.</p>
         </div>
         <p class="stats-meta" id="latency-meta">Načítám odezvu…</p>
         <section class="latency-chart-wrap" aria-label="Týdenní odezva LingQ">
@@ -324,6 +358,7 @@
       </section>
     </main>
     <div class="resize-handle" id="resize-handle" title="Změnit velikost okna" aria-label="Změnit velikost okna"></div>
+    <script src="role.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -251,3 +251,28 @@ Verze 0.2.35
 6. 11. 2026 19:39
 - Stabilní release: funkce vázané na Supabase (Slovník, Import, Statistiky, Odezva, sync) fungují jen po vyplnění údajů a úspěšné kontrole schématu.
 - Kontrola/instalace DB v Nastavení; Návod; záložka Návod; přehlednější Nastavení; mazání slovíček z LingQ i DB.
+
+Verze 0.2.36
+6. 11. 2026 19:48
+- Oprava kontroly DB: touch_word / update_word_fields se ověřují správnými argumenty (dříve falešná chyba „funkce chybí“).
+
+Verze 0.2.37
+6. 11. 2026 19:53
+- Role buildu admin/user (role.js, set-role.ps1): automatická odezva LingQ při nečinnosti jen v admin verzi.
+- Veřejný build: powershell -File set-role.ps1 -Role user
+
+Verze 0.2.38
+6. 11. 2026 19:56
+- V Nastavení lze vypnout ChatGPT a Supabase DB (přepínače); související volby a DB funkce se skryjí / vypnou.
+
+Verze 0.2.39
+6. 11. 2026 20:00
+- Nastavení vizuálně rozděleno do sekcí: Ostatní nastavení, ChatGPT a Supabase DB.
+
+Verze 0.2.40
+6. 11. 2026 20:06
+- Stabilní release: vypínatelné ChatGPT a Supabase DB; Nastavení v sekcích; Uložit vždy viditelné; oprava kontroly DB; admin/user role (idle odezva jen admin).
+- Tlačítko Uložit nastavení je vždy viditelné dole (nepřesune se mimo viewport při scrollování).
+- Nastavení vizuálně rozděleno do sekcí: Ostatní nastavení, ChatGPT a Supabase DB.
+- V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
+- Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.

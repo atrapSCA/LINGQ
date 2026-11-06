@@ -21,3 +21,6 @@ VALUES ('schema_version', '3', now())
 ON CONFLICT (key) DO UPDATE
 SET value = EXCLUDED.value,
     updated_at = now();
+
+-- Obnoví cache PostgREST (nové tabulky/funkce hned viditelné přes API).
+NOTIFY pgrst, 'reload schema';

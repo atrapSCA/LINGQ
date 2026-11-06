@@ -8,9 +8,11 @@ const DEFAULTS = {
   latencyIdleMaxSeconds: 80,
   chatgptApiKey: '',
   chatgptApiKeyValid: false,
+  chatgptEnabled: true,
   chatgptModel: 'gpt-5-nano',
   alternativesSource: 'lingq',
   newWordTranslationSource: 'lingq',
+  supabaseEnabled: true,
   supabaseUrl: '',
   supabaseKey: '',
 };
@@ -37,6 +39,9 @@ const POPUP_SIZE_LIMITS = {
 
 const form = document.getElementById('settings-form');
 const apiKeyInput = document.getElementById('api-key');
+const chatgptEnabledInput = document.getElementById('chatgpt-enabled');
+const chatgptSettingsBlock = document.getElementById('chatgpt-settings-block');
+const chatgptKeyBlock = document.getElementById('chatgpt-key-block');
 const chatgptApiKeyInput = document.getElementById('chatgpt-api-key');
 const chatgptKeyStatus = document.getElementById('chatgpt-key-status');
 const newWordSourceInput = document.getElementById('new-word-source');
@@ -49,12 +54,15 @@ const chatgptModelInput = document.getElementById('chatgpt-model');
 const chatgptModelHelp = document.getElementById('chatgpt-model-help');
 const languageInput = document.getElementById('language');
 const targetLanguageInput = document.getElementById('target-language');
+const supabaseEnabledInput = document.getElementById('supabase-enabled');
+const supabaseSettingsBlock = document.getElementById('supabase-settings-block');
 const supabaseUrlInput = document.getElementById('supabase-url');
 const supabaseKeyInput = document.getElementById('supabase-key');
 const enabledInput = document.getElementById('enabled');
 const clickCountInput = document.getElementById('click-count');
 const latencyIdleMinInput = document.getElementById('latency-idle-min');
 const latencyIdleMaxInput = document.getElementById('latency-idle-max');
+const adminIdleSettings = document.getElementById('admin-idle-settings');
 const clickHelp = document.getElementById('click-help');
 const toggleKeyButton = document.getElementById('toggle-key');
 const toggleChatgptKeyButton = document.getElementById('toggle-chatgpt-key');
@@ -115,9 +123,19 @@ let currentPopupHeight = POPUP_SIZE_DEFAULTS.popupHeight;
 
 restorePopupSize();
 setupPopupResize();
+applyBuildRoleUi();
 refreshSupabaseGate({ force: true }).finally(() => {
   restoreKnownWordsSyncStatus();
 });
+
+function applyBuildRoleUi() {
+  const admin = typeof isAdminBuild === 'function' && isAdminBuild();
+  if (adminIdleSettings) {
+    adminIdleSettings.hidden = !admin;
+  }
+  document.body.classList.toggle('is-admin-build', admin);
+  document.body.classList.toggle('is-user-build', !admin);
+}
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.knownWordsSync) {
@@ -147,11 +165,13 @@ resetLingqImportButton.addEventListener('click', () => {
 
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   apiKeyInput.value = settings.apiKey;
+  chatgptEnabledInput.checked = settings.chatgptEnabled !== false;
   chatgptApiKeyInput.value = settings.chatgptApiKey || '';
   chatgptApiKeyValid = settings.chatgptApiKeyValid === true && Boolean(String(settings.chatgptApiKey || '').trim());
   chatgptModelInput.value = resolveChatgptModel(settings.chatgptModel);
   languageInput.value = settings.language;
   targetLanguageInput.value = settings.targetLanguage;
+  supabaseEnabledInput.checked = settings.supabaseEnabled !== false;
   supabaseUrlInput.value = settings.supabaseUrl || DEFAULTS.supabaseUrl;
   supabaseKeyInput.value = settings.supabaseKey || DEFAULTS.supabaseKey;
   enabledInput.checked = settings.enabled;
@@ -161,11 +181,12 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   latencyIdleMaxInput.value = String(idleRange.max);
   renderStatus(settings.enabled);
   renderClickHelp(clickCountInput.value);
+  applyOptionalFeatureUi();
   updateChatgptDependentAvailability({
     alternativesSource: settings.alternativesSource === 'chatgpt' ? 'chatgpt' : 'lingq',
     newWordTranslationSource: settings.newWordTranslationSource === 'chatgpt' ? 'chatgpt' : 'lingq',
   });
-  if (chatgptApiKeyInput.value.trim()) {
+  if (chatgptEnabledInput.checked && chatgptApiKeyInput.value.trim()) {
     validateChatgptApiKey(chatgptApiKeyInput.value.trim(), { quiet: chatgptApiKeyValid });
   } else {
     setChatgptKeyStatus('');
@@ -181,13 +202,17 @@ tabButtons.forEach((button) => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const chatgptApiKey = chatgptApiKeyInput.value.trim();
-  const valid = await validateChatgptApiKey(chatgptApiKey);
-  const alternativesSource = valid && alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
-  const newWordTranslationSource = valid && newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
+  const chatgptEnabled = chatgptEnabledInput.checked;
+  const supabaseEnabled = supabaseEnabledInput.checked;
+  const chatgptApiKey = chatgptEnabled ? chatgptApiKeyInput.value.trim() : chatgptApiKeyInput.value.trim();
+  const valid = chatgptEnabled ? await validateChatgptApiKey(chatgptApiKey) : false;
+  const alternativesSource = chatgptEnabled && valid && alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
+  const newWordTranslationSource = chatgptEnabled && valid && newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
+  applyOptionalFeatureUi();
   updateChatgptDependentAvailability({ alternativesSource, newWordTranslationSource });
   chrome.storage.sync.set({
     apiKey: apiKeyInput.value.trim(),
+    chatgptEnabled,
     chatgptApiKey,
     chatgptApiKeyValid: valid,
     chatgptModel: resolveChatgptModel(chatgptModelInput.value),
@@ -195,6 +220,7 @@ form.addEventListener('submit', async (event) => {
     newWordTranslationSource,
     language: languageInput.value,
     targetLanguage: targetLanguageInput.value,
+    supabaseEnabled,
     supabaseUrl: supabaseUrlInput.value.trim().replace(/\/$/, ''),
     supabaseKey: supabaseKeyInput.value.trim(),
     ...readIdleRange(),
@@ -207,6 +233,37 @@ form.addEventListener('submit', async (event) => {
     latencyLoaded = false;
     refreshSupabaseGate({ force: true });
     window.setTimeout(() => { formMessage.textContent = ''; }, 2200);
+  });
+});
+
+chatgptEnabledInput.addEventListener('change', () => {
+  const chatgptEnabled = chatgptEnabledInput.checked;
+  applyOptionalFeatureUi();
+  if (!chatgptEnabled) {
+    chatgptApiKeyValid = false;
+    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+    chrome.storage.sync.set({
+      chatgptEnabled: false,
+      alternativesSource: 'lingq',
+      newWordTranslationSource: 'lingq',
+    });
+    return;
+  }
+  chrome.storage.sync.set({ chatgptEnabled: true });
+  if (chatgptApiKeyInput.value.trim()) {
+    validateChatgptApiKey(chatgptApiKeyInput.value.trim());
+  } else {
+    updateChatgptDependentAvailability({ alternativesSource: 'lingq', newWordTranslationSource: 'lingq' });
+  }
+});
+
+supabaseEnabledInput.addEventListener('change', () => {
+  const supabaseEnabled = supabaseEnabledInput.checked;
+  applyOptionalFeatureUi();
+  chrome.storage.sync.set({ supabaseEnabled }, () => {
+    wordsLoaded = false;
+    latencyLoaded = false;
+    refreshSupabaseGate({ force: true });
   });
 });
 
@@ -290,17 +347,41 @@ function resolveChatgptModel(model) {
   return CHATGPT_MODEL_IDS.includes(value) ? value : DEFAULTS.chatgptModel;
 }
 
+function applyOptionalFeatureUi() {
+  const chatgptOn = chatgptEnabledInput.checked;
+  const supabaseOn = supabaseEnabledInput.checked;
+  if (chatgptSettingsBlock) {
+    chatgptSettingsBlock.hidden = !chatgptOn;
+  }
+  if (chatgptKeyBlock) {
+    chatgptKeyBlock.hidden = !chatgptOn;
+  }
+  if (supabaseSettingsBlock) {
+    supabaseSettingsBlock.hidden = !supabaseOn;
+  }
+}
+
 function updateChatgptDependentAvailability(preferences = {}) {
-  const available = chatgptApiKeyValid === true;
+  const chatgptOn = chatgptEnabledInput.checked;
+  const available = chatgptOn && chatgptApiKeyValid === true;
   const preferredAlternatives = preferences.alternativesSource ?? alternativesSourceInput.value;
   const preferredNewWord = preferences.newWordTranslationSource ?? newWordSourceInput.value;
 
   newWordSourceChatgptOption.disabled = !available;
   alternativesSourceChatgptOption.disabled = !available;
-  newWordSourceInput.disabled = false;
-  alternativesSourceInput.disabled = false;
+  newWordSourceInput.disabled = !chatgptOn;
+  alternativesSourceInput.disabled = !chatgptOn;
   chatgptModelInput.disabled = !available;
   chatgptModelInput.value = resolveChatgptModel(chatgptModelInput.value);
+
+  if (!chatgptOn) {
+    newWordSourceInput.value = 'lingq';
+    alternativesSourceInput.value = 'lingq';
+    newWordSourceHelp.textContent = 'ChatGPT je vypnuté — používá se LingQ API.';
+    alternativesSourceHelp.textContent = 'ChatGPT je vypnuté — používá se LingQ API.';
+    chatgptModelHelp.textContent = 'Zapněte ChatGPT výše, pokud chcete volit model.';
+    return;
+  }
 
   if (!available) {
     newWordSourceInput.value = 'lingq';
