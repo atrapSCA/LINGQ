@@ -277,6 +277,13 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.7
+7. 11. 2026 14:55
+- Stabilní user release: hodnocení Ignored (I) vedle 1–4 a K; sync s LingQ status −1; schéma Supabase v5.
+- Ignorovaná slovíčka nejsou ve slovníku, statistikách ani podbarvení stránky.
+- Bublina: přeškrtnuté oko (I), 1–4, fajfka (K); výraznější aktivní úroveň; modrá jen u nového/neznámého slova.
+- Indikátor přípravy podbarvení (horní pruh); spolehlivější podbarvení po SPA navigaci (Reddit); lepší přeskočení odkazů.
+
 Verze 0.3.6
 7. 11. 2026 13:40
 - Stabilní user release: podbarvení slovíček na stránce podle Supabase DB.

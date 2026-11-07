@@ -1,6 +1,15 @@
 const TOOLTIP_ID = 'lingq-click-translator-tooltip';
 const WORD_PATTERN = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/u;
-const STATUS_LEVELS = [['1', 1], ['2', 2], ['3', 3], ['4', 4], ['K', 5]];
+const STATUS_LEVELS = [
+  { value: -1, kind: 'ignored', label: 'I' },
+  { value: 1, kind: 'level', label: '1' },
+  { value: 2, kind: 'level', label: '2' },
+  { value: 3, kind: 'level', label: '3' },
+  { value: 4, kind: 'level', label: '4' },
+  { value: 5, kind: 'known', label: 'K' },
+];
+const LEVEL_ICON_IGNORED = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M12 6c3.79 0 7.17 2.13 8.82 5.5-.59 1.22-1.42 2.27-2.41 3.12l1.41 1.41c1.39-1.23 2.49-2.77 3.18-4.53L23 12l-.01-.24C21.27 7.11 16.99 4 12 4c-1.27 0-2.49.2-3.64.57l1.65 1.65C10.66 6.09 11.32 6 12 6zm-9.83.13L2.1 6.2l1.55 1.55C2.66 9.03 1.7 10.4 1.01 11.76L1 12l.01.24C2.73 16.89 7.01 20 12 20c1.61 0 3.14-.31 4.55-.88l1.64 1.64 1.41-1.41L3.58 4.72 2.17 6.13zM12 18c-3.79 0-7.17-2.13-8.82-5.5.7-1.43 1.76-2.64 3.05-3.53l1.61 1.61c-.3.43-.47.94-.47 1.48 0 1.66 1.34 3 3 3 .54 0 1.05-.17 1.48-.47l1.56 1.56c-.74.28-1.53.43-2.41.43zm2.97-4.85-2.12-2.12c.1-.05.2-.09.32-.12.66-.15 1.36.02 1.88.54.52.52.69 1.22.54 1.88-.03.12-.07.22-.12.32z"/></svg>';
+const LEVEL_ICON_KNOWN = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M9.2 16.6 4.8 12.2l1.4-1.4 3 3 8-8 1.4 1.4z"/></svg>';
 const USER_PHRASE_WORD_LIMIT = 10;
 const HIGHLIGHT_CLASS = 'lingq-hl';
 const HIGHLIGHT_SKIP_TAGS = new Set([
@@ -24,6 +33,9 @@ let highlightRunId = 0;
 let highlightMutationTimer = 0;
 let highlightObserver = null;
 let highlightApplying = false;
+let highlightBusyEl = null;
+let highlightBusyShowTimer = 0;
+let highlightBusyToken = 0;
 
 let i18nReady = Promise.resolve();
 
@@ -247,7 +259,13 @@ async function lookupFromPoint(clientX, clientY, target, event) {
       showTooltip(selection.word, selection.rect, response?.error || t('bubble.lingqFailed'), 'error', 0, null, []);
       return;
     }
-    const kind = response.unknown ? 'unknown' : 'known';
+    // Modrá jen u nově založeného / dosud nesledovaného slova — ne u znalosti 1–4, K ani I.
+    const statusNum = Number(response.status);
+    const hasTrackedStatus = statusNum === -1 || (statusNum >= 1 && statusNum <= 5);
+    const kind = (
+      response.created === true
+      || (response.unknown === true && !hasTrackedStatus)
+    ) ? 'unknown' : 'known';
     showTooltip(
       selection.word,
       selection.rect,
@@ -259,7 +277,7 @@ async function lookupFromPoint(clientX, clientY, target, event) {
       response.viewCount || null,
       response.alternativesSource || 'lingq',
     );
-    if (Number.isFinite(Number(response.status)) && Number(response.status) > 0) {
+    if (Number.isFinite(Number(response.status)) && (Number(response.status) > 0 || Number(response.status) === -1)) {
       updateHighlightForWord(selection.word, Number(response.status));
     }
   });
@@ -509,22 +527,8 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
 
   const levels = tooltip.querySelector('.lingq-tooltip__levels');
   if (kind !== 'loading' && kind !== 'error') {
-    STATUS_LEVELS.forEach(([label, value]) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `lingq-level lingq-level--${value === Number(status) ? 'active' : 'empty'}`;
-      if (value === 5) {
-        button.classList.add('lingq-level--known');
-      }
-      button.textContent = label;
-      button.title = t('bubble.setLevel', { level: label });
-      button.addEventListener('click', (event) => {
-        if (!event.isTrusted) {
-          return;
-        }
-        changeStatus(value);
-      });
-      levels.appendChild(button);
+    STATUS_LEVELS.forEach((level) => {
+      levels.appendChild(createLevelButton(level, Number(status)));
     });
   }
 
@@ -838,6 +842,44 @@ function saveTranslation(element) {
   });
 }
 
+function levelTitle(level) {
+  if (level.kind === 'ignored') {
+    return t('bubble.setIgnored');
+  }
+  if (level.kind === 'known') {
+    return t('bubble.setLevel', { level: 'K' });
+  }
+  return t('bubble.setLevel', { level: level.label });
+}
+
+function createLevelButton(level, activeStatus) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.status = String(level.value);
+  applyLevelButtonState(button, level, activeStatus);
+  button.title = levelTitle(level);
+  button.setAttribute('aria-label', levelTitle(level));
+  button.addEventListener('click', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
+    changeStatus(level.value);
+  });
+  return button;
+}
+
+function applyLevelButtonState(button, level, activeStatus) {
+  const active = Number(activeStatus) === level.value;
+  button.className = `lingq-level lingq-level--${level.kind} lingq-level--${active ? 'active' : 'empty'}`;
+  if (level.kind === 'ignored') {
+    button.innerHTML = LEVEL_ICON_IGNORED;
+  } else if (level.kind === 'known') {
+    button.innerHTML = LEVEL_ICON_KNOWN;
+  } else {
+    button.textContent = level.label;
+  }
+}
+
 function changeStatus(status) {
   const cardId = tooltip?.dataset.cardId || '';
   const word = tooltip?.dataset.word || '';
@@ -858,11 +900,7 @@ function changeStatus(status) {
       tooltip.dataset.cardId = String(response.cardId);
     }
     buttons.forEach((button, index) => {
-      const value = STATUS_LEVELS[index][1];
-      button.className = `lingq-level lingq-level--${value === Number(response.status) ? 'active' : 'empty'}`;
-      if (value === 5) {
-        button.classList.add('lingq-level--known');
-      }
+      applyLevelButtonState(button, STATUS_LEVELS[index], Number(response.status));
       button.disabled = false;
     });
     showTooltipMessage(t('bubble.levelSaved'));
@@ -883,55 +921,259 @@ function hideTooltip() {
   }
 }
 
-function schedulePageHighlight({ force = false } = {}) {
+function pageLocationKey() {
+  return `${location.pathname}${location.search}`;
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+}
+
+function schedulePageHighlight({ force = false, immediateBusy = false, settleRetries = null } = {}) {
   window.clearTimeout(schedulePageHighlight.timer);
   schedulePageHighlight.timer = window.setTimeout(() => {
-    refreshPageHighlight({ force }).catch(() => {});
+    refreshPageHighlight({ force, immediateBusy, settleRetries }).catch(() => {});
   }, force ? 50 : 250);
 }
 
-async function refreshPageHighlight({ force = false } = {}) {
-  if (!enabled || !highlightEnabled) {
-    clearPageHighlights();
-    stopHighlightObserver();
-    highlightMap = Object.create(null);
+function scheduleHighlightAfterNavigation() {
+  if (highlightBusyEl && !highlightBusyEl.isConnected) {
+    highlightBusyEl = null;
+  }
+  // Pruh hned; podbarvení několikrát po usazení DOM (Reddit SPA).
+  beginHighlightBusy({ immediate: true });
+  window.clearTimeout(scheduleHighlightAfterNavigation.timer);
+  scheduleHighlightAfterNavigation.timer = window.setTimeout(() => {
+    schedulePageHighlight({
+      immediateBusy: true,
+      settleRetries: [0, 600, 1400, 2800],
+    });
+  }, 120);
+}
+
+function watchPageNavigation() {
+  if (watchPageNavigation.started) {
     return;
   }
+  watchPageNavigation.started = true;
+  watchPageNavigation.lastKey = pageLocationKey();
 
-  const runId = ++highlightRunId;
-  // První načtení vždy z DB (ne ze staré cache po updatu doplňku).
-  const requestForce = Boolean(force) || !schedulePageHighlight.loadedOnce;
-  const response = await new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_HIGHLIGHT_MAP', force: requestForce }, (result) => {
-      if (chrome.runtime.lastError) {
-        resolve(null);
-        return;
-      }
-      resolve(result);
-    });
+  const onMaybeNavigate = () => {
+    const nextKey = pageLocationKey();
+    if (nextKey === watchPageNavigation.lastKey) {
+      return;
+    }
+    watchPageNavigation.lastKey = nextKey;
+    scheduleHighlightAfterNavigation();
+  };
+
+  window.addEventListener('popstate', onMaybeNavigate);
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      watchPageNavigation.lastKey = pageLocationKey();
+      scheduleHighlightAfterNavigation();
+    }
   });
 
-  if (runId !== highlightRunId) {
-    return;
+  if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+    try {
+      window.navigation.addEventListener('currententrychange', onMaybeNavigate);
+    } catch {
+      // Starší prohlížeče / omezený Navigation API.
+    }
   }
 
-  if (!response?.ok || response.enabled === false || response.ready === false) {
+  const wrapHistory = (methodName) => {
+    const original = history[methodName];
+    if (typeof original !== 'function') {
+      return;
+    }
+    history[methodName] = function lingqWrappedHistory(...args) {
+      const result = original.apply(this, args);
+      queuePromise.resolve().then(onMaybeNavigate);
+      return result;
+    };
+  };
+  // Reddit často mění cestu i přes replaceState.
+  wrapHistory('pushState');
+  wrapHistory('replaceState');
+}
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== 'HIGHLIGHT_PAGE_CHANGED') {
+    return;
+  }
+  if (!enabled || !highlightEnabled) {
+    return;
+  }
+  const nextKey = pageLocationKey();
+  const now = Date.now();
+  if (watchPageNavigation.lastKey === nextKey
+    && now - (watchPageNavigation.lastExternalAt || 0) < 500) {
+    return;
+  }
+  watchPageNavigation.lastKey = nextKey;
+  watchPageNavigation.lastExternalAt = now;
+  scheduleHighlightAfterNavigation();
+});
+
+async function refreshPageHighlight({ force = false, immediateBusy = false, settleRetries = null } = {}) {
+  if (!enabled || !highlightEnabled) {
+    hideHighlightBusy();
     clearPageHighlights();
     stopHighlightObserver();
     highlightMap = Object.create(null);
     return;
   }
 
-  highlightMap = response.words && typeof response.words === 'object'
-    ? response.words
-    : Object.create(null);
-  schedulePageHighlight.loadedOnce = true;
-
-  clearPageHighlights();
-  await applyHighlightsToRoot(document.body, runId);
-  if (runId === highlightRunId) {
-    startHighlightObserver();
+  // Jedna běžící obnova; další požadavky se sloučí na jeden doběh.
+  if (refreshPageHighlight.running) {
+    refreshPageHighlight.queued = {
+      force: Boolean(force) || Boolean(refreshPageHighlight.queued?.force),
+      immediateBusy: Boolean(immediateBusy) || Boolean(refreshPageHighlight.queued?.immediateBusy),
+      settleRetries: settleRetries || refreshPageHighlight.queued?.settleRetries || null,
+    };
+    return;
   }
+
+  refreshPageHighlight.running = true;
+  try {
+    do {
+      const queued = refreshPageHighlight.queued;
+      refreshPageHighlight.queued = null;
+      const runForce = Boolean(force) || Boolean(queued?.force);
+      const runImmediateBusy = Boolean(immediateBusy) || Boolean(queued?.immediateBusy);
+      const runRetries = Array.isArray(settleRetries)
+        ? settleRetries
+        : (Array.isArray(queued?.settleRetries) ? queued.settleRetries : [0]);
+      force = false;
+      immediateBusy = false;
+      settleRetries = null;
+
+      const runId = ++highlightRunId;
+      const busyToken = beginHighlightBusy({ immediate: runImmediateBusy });
+      try {
+        // První načtení vždy z DB (ne ze staré cache po updatu doplňku).
+        const requestForce = runForce || !schedulePageHighlight.loadedOnce;
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ type: 'GET_HIGHLIGHT_MAP', force: requestForce }, (result) => {
+            if (chrome.runtime.lastError) {
+              resolve(null);
+              return;
+            }
+            resolve(result);
+          });
+        });
+
+        if (!enabled || !highlightEnabled) {
+          clearPageHighlights();
+          stopHighlightObserver();
+          highlightMap = Object.create(null);
+          break;
+        }
+
+        if (!response?.ok || response.enabled === false || response.ready === false) {
+          clearPageHighlights();
+          stopHighlightObserver();
+          highlightMap = Object.create(null);
+          break;
+        }
+
+        highlightMap = response.words && typeof response.words === 'object'
+          ? response.words
+          : Object.create(null);
+        schedulePageHighlight.loadedOnce = true;
+
+        clearPageHighlights();
+        let previousDelay = 0;
+        for (const delay of runRetries) {
+          if (runId !== highlightRunId) {
+            break;
+          }
+          const wait = Math.max(0, Number(delay) || 0) - previousDelay;
+          previousDelay = Math.max(previousDelay, Number(delay) || 0);
+          if (wait > 0) {
+            await sleepMs(wait);
+          }
+          if (runId !== highlightRunId || !document.body) {
+            break;
+          }
+          await applyHighlightsToRoot(document.body, runId);
+        }
+        if (runId === highlightRunId) {
+          startHighlightObserver();
+        }
+      } finally {
+        endHighlightBusy(busyToken);
+      }
+    } while (refreshPageHighlight.queued);
+  } finally {
+    refreshPageHighlight.running = false;
+  }
+}
+
+function ensureHighlightBusyEl() {
+  if (highlightBusyEl?.isConnected) {
+    return highlightBusyEl;
+  }
+  const existing = document.getElementById('lingq-highlight-busy');
+  if (existing) {
+    highlightBusyEl = existing;
+    return existing;
+  }
+  const el = document.createElement('div');
+  el.id = 'lingq-highlight-busy';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.hidden = true;
+  el.innerHTML = '<span class="lingq-highlight-busy__dot" aria-hidden="true"></span><span class="lingq-highlight-busy__text"></span><span class="lingq-highlight-busy__bar" aria-hidden="true"></span>';
+  (document.documentElement || document.body).appendChild(el);
+  highlightBusyEl = el;
+  return el;
+}
+
+function beginHighlightBusy({ immediate = false } = {}) {
+  const token = ++highlightBusyToken;
+  window.clearTimeout(highlightBusyShowTimer);
+  const show = () => {
+    if (token !== highlightBusyToken) {
+      return;
+    }
+    const el = ensureHighlightBusyEl();
+    const text = el.querySelector('.lingq-highlight-busy__text');
+    if (text) {
+      text.textContent = t('highlight.preparing');
+    }
+    el.hidden = false;
+    el.classList.add('lingq-highlight-busy--visible');
+  };
+  if (immediate) {
+    show();
+  } else {
+    // Krátká prodleva — rychlá cache neblikne.
+    highlightBusyShowTimer = window.setTimeout(show, 280);
+  }
+  return token;
+}
+
+function endHighlightBusy(token) {
+  if (token != null && token !== highlightBusyToken) {
+    return;
+  }
+  hideHighlightBusy();
+}
+
+function hideHighlightBusy() {
+  window.clearTimeout(highlightBusyShowTimer);
+  highlightBusyShowTimer = 0;
+  highlightBusyToken += 1;
+  if (!highlightBusyEl) {
+    return;
+  }
+  highlightBusyEl.classList.remove('lingq-highlight-busy--visible');
+  highlightBusyEl.hidden = true;
 }
 
 function clearPageHighlights() {
@@ -1004,8 +1246,8 @@ function resolveHighlightEntry(rawWord) {
 
 function highlightClassForStatus(status) {
   const level = Number(status);
-  // 5 = K, 6 = v DB bez překladu → bez barvy
-  if (level === 5 || level === 6) {
+  // −1 = Ignored, 5 = K, 6 = v DB bez překladu → bez barvy
+  if (level === -1 || level === 5 || level === 6) {
     return null;
   }
   if (Number.isInteger(level) && level >= 1 && level <= 4) {
@@ -1020,7 +1262,7 @@ function updateHighlightForWord(word, status) {
     return;
   }
   const level = Number(status);
-  if (Number.isInteger(level) && level >= 1 && level <= 5) {
+  if (level === -1 || (Number.isInteger(level) && level >= 1 && level <= 5)) {
     keys.forEach((key) => {
       highlightMap[key] = level;
     });
@@ -1052,18 +1294,211 @@ function updateHighlightForWord(word, status) {
   });
 }
 
+const overlayLinkCache = new WeakMap();
+
+function isLinkElement(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE) {
+    return false;
+  }
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'A' || tag === 'AREA') {
+    return true;
+  }
+  if (el.getAttribute?.('role') === 'link') {
+    return true;
+  }
+  // Obyčejný i custom prvek s href (Reddit / routery).
+  if (el.hasAttribute?.('href')) {
+    return true;
+  }
+  const name = String(el.localName || '').toLowerCase();
+  if (
+    name.endsWith('-link')
+    || name.endsWith('-anchor')
+    || name.includes('permalink')
+    || name.includes('faceplate-tracker')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Parent ve light i shadow DOM včetně slotted obsahu. */
+function composedParent(el) {
+  if (!el) {
+    return null;
+  }
+  if (el.assignedSlot) {
+    return el.assignedSlot;
+  }
+  if (el.parentElement) {
+    return el.parentElement;
+  }
+  const root = typeof el.getRootNode === 'function' ? el.getRootNode() : null;
+  if (root && root !== document && root.host) {
+    return root.host;
+  }
+  return null;
+}
+
+function elementHasCoveringLink(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE || typeof el.querySelector !== 'function') {
+    return false;
+  }
+  if (overlayLinkCache.has(el)) {
+    return overlayLinkCache.get(el);
+  }
+  let result = false;
+  try {
+    // Jen přímé děti — jinak by body/main se všemi odkazy zablokovaly celé podbarvení.
+    const links = el.querySelectorAll(':scope > a[href], :scope > [role="link"], :scope > [href]');
+    for (const link of links) {
+      let style;
+      try {
+        style = window.getComputedStyle(link);
+      } catch {
+        continue;
+      }
+      if (!style) {
+        continue;
+      }
+      if (style.position === 'absolute' || style.position === 'fixed') {
+        const width = Number.parseFloat(style.width);
+        const height = Number.parseFloat(style.height);
+        const insetFull = style.inset === '0px'
+          || (style.top === '0px' && style.right === '0px' && style.bottom === '0px' && style.left === '0px');
+        if (insetFull || (width >= 40 && height >= 40) || style.width === '100%' || style.height === '100%') {
+          result = true;
+          break;
+        }
+      }
+      const cls = `${link.className || ''} ${link.getAttribute?.('slot') || ''}`;
+      if (/\binset-0\b|\babsolute\b|full-post-link|post-link|overlay/i.test(cls)) {
+        result = true;
+        break;
+      }
+    }
+  } catch {
+    result = false;
+  }
+  overlayLinkCache.set(el, result);
+  return result;
+}
+
+function findSiblingPostLink(container, textEl) {
+  if (!container?.querySelectorAll || !textEl) {
+    return null;
+  }
+  try {
+    for (const link of container.querySelectorAll('a[href], [href]')) {
+      const href = String(link.getAttribute?.('href') || link.href || '');
+      if (!/\/comments\//.test(href) && !/\/r\/[^/]+\/s\//.test(href)) {
+        continue;
+      }
+      if (link.contains(textEl)) {
+        continue;
+      }
+      return link;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isCompactLinkedCardChrome(node) {
+  const textEl = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  if (!textEl) {
+    return false;
+  }
+  let el = textEl;
+  for (let depth = 0; depth < 10 && el; depth += 1) {
+    const postLink = findSiblingPostLink(el, textEl);
+    if (postLink) {
+      let rect;
+      try {
+        rect = el.getBoundingClientRect();
+      } catch {
+        rect = null;
+      }
+      // Related post karta je nízká; hlavní článek je vysoký — ten nepřeskakovat.
+      if (rect && rect.height > 0 && rect.height <= 260 && rect.width > 0 && rect.width <= 560) {
+        return true;
+      }
+    }
+    el = composedParent(el);
+  }
+  return false;
+}
+
+function isInsideLink(node) {
+  let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  let depth = 0;
+  while (el && depth < 40) {
+    if (isLinkElement(el)) {
+      return true;
+    }
+    el = composedParent(el);
+    depth += 1;
+  }
+
+  // Karty s překryvným odkazem (absolutní <a> přes celou kartu).
+  el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  depth = 0;
+  while (el && depth < 12) {
+    if (elementHasCoveringLink(el)) {
+      return true;
+    }
+    el = composedParent(el);
+    depth += 1;
+  }
+
+  // Reddit related posts: „397 pozitivních hlasů“ je mimo <a>, ale ve stejné kartě jako permalink.
+  if (isCompactLinkedCardChrome(node)) {
+    return true;
+  }
+  return false;
+}
+
+function unwrapHighlightSpan(span) {
+  const parent = span.parentNode;
+  if (!parent) {
+    return;
+  }
+  parent.replaceChild(document.createTextNode(span.textContent || ''), span);
+  parent.normalize();
+}
+
+function removeHighlightsInsideLinks(root = document) {
+  const scope = root && root.querySelectorAll ? root : document;
+  const spans = scope.querySelectorAll(`.${HIGHLIGHT_CLASS}`);
+  if (spans.length === 0) {
+    return;
+  }
+  const wasApplying = highlightApplying;
+  highlightApplying = true;
+  try {
+    spans.forEach((span) => {
+      if (isInsideLink(span)) {
+        unwrapHighlightSpan(span);
+      }
+    });
+  } finally {
+    highlightApplying = wasApplying;
+  }
+}
+
 function isHighlightSkipped(node) {
   let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  if (isInsideLink(node)) {
+    return true;
+  }
   while (el) {
     const tag = String(el.tagName || '').toUpperCase();
-    if (el.id === TOOLTIP_ID || el.classList?.contains(HIGHLIGHT_CLASS)) {
+    if (el.id === TOOLTIP_ID || el.id === 'lingq-highlight-busy' || el.classList?.contains(HIGHLIGHT_CLASS)) {
       return true;
     }
     if (HIGHLIGHT_SKIP_TAGS.has(tag)) {
-      return true;
-    }
-    // Odkazy — nikdy nepodbarvovat.
-    if (tag === 'A' || tag === 'AREA' || el.getAttribute?.('role') === 'link') {
       return true;
     }
     if (el.isContentEditable || el.getAttribute?.('contenteditable') === 'true') {
@@ -1121,6 +1556,9 @@ async function applyHighlightsToRoot(root, runId) {
       }
     });
   }
+  if (runId === highlightRunId) {
+    removeHighlightsInsideLinks(root);
+  }
 }
 
 function wrapHighlightedWords(textNode) {
@@ -1137,8 +1575,8 @@ function wrapHighlightedWords(textNode) {
     if (!entry.key && !entry.inDb) {
       continue;
     }
-    // K (5) / v DB bez překladu (6) bez barvy; 1–4 žlutá; mimo DB = neznámé (modrá).
-    if (entry.inDb && (entry.status === 5 || entry.status === 6)) {
+    // Ignored (−1) / K (5) / v DB bez překladu (6) bez barvy; 1–4 žlutá; mimo DB = neznámé (modrá).
+    if (entry.inDb && (entry.status === -1 || entry.status === 5 || entry.status === 6)) {
       continue;
     }
     const className = highlightClassForStatus(entry.inDb ? entry.status : 0);
@@ -1163,6 +1601,10 @@ function wrapHighlightedWords(textNode) {
   if (lastIndex < text.length) {
     fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
   }
+  // Mezitím mohl vzniknout odkaz kolem textu — nepodbarvovat.
+  if (isInsideLink(textNode.parentElement || textNode)) {
+    return;
+  }
   textNode.parentNode?.replaceChild(fragment, textNode);
 }
 
@@ -1171,14 +1613,18 @@ function startHighlightObserver() {
     return;
   }
   highlightObserver = new MutationObserver((mutations) => {
-    if (highlightApplying || !enabled || !highlightEnabled) {
+    if (highlightApplying || !enabled || !highlightEnabled || refreshPageHighlight.running) {
       return;
     }
     const roots = [];
     for (const mutation of mutations) {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          if (node.classList?.contains(HIGHLIGHT_CLASS) || node.id === TOOLTIP_ID) {
+          if (
+            node.classList?.contains(HIGHLIGHT_CLASS)
+            || node.id === TOOLTIP_ID
+            || node.id === 'lingq-highlight-busy'
+          ) {
             return;
           }
           roots.push(node);
@@ -1192,9 +1638,17 @@ function startHighlightObserver() {
     }
     window.clearTimeout(highlightMutationTimer);
     highlightMutationTimer = window.setTimeout(() => {
+      if (highlightApplying || refreshPageHighlight.running) {
+        return;
+      }
       const runId = highlightRunId;
       roots.forEach((root) => {
-        if (root.isConnected && !isHighlightSkipped(root)) {
+        if (!root.isConnected) {
+          return;
+        }
+        // Nový odkaz kolem už podbarveného textu → barvu zase sundat.
+        removeHighlightsInsideLinks(root);
+        if (!isHighlightSkipped(root)) {
           applyHighlightsToRoot(root, runId).catch(() => {});
         }
       });
@@ -1213,6 +1667,8 @@ function stopHighlightObserver() {
   }
   window.clearTimeout(highlightMutationTimer);
 }
+
+watchPageNavigation();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => schedulePageHighlight(), { once: true });

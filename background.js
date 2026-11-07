@@ -102,8 +102,37 @@ const MESSAGE_RATE_LIMITS = {
   GET_ALTERNATIVES: { windowMs: 60_000, max: 30 },
   UPDATE_STATUS: { windowMs: 60_000, max: 60 },
   UPDATE_TRANSLATION: { windowMs: 60_000, max: 60 },
-  GET_HIGHLIGHT_MAP: { windowMs: 60_000, max: 12 },
+  GET_HIGHLIGHT_MAP: { windowMs: 60_000, max: 60 },
 };
+
+const highlightNavNotifyAt = new Map();
+
+function notifyTabHighlightNavigation(tabId, url) {
+  if (!Number.isInteger(tabId) || tabId < 0) {
+    return;
+  }
+  const now = Date.now();
+  const previous = highlightNavNotifyAt.get(tabId) || 0;
+  if (now - previous < 350) {
+    return;
+  }
+  highlightNavNotifyAt.set(tabId, now);
+  chrome.tabs.sendMessage(tabId, {
+    type: 'HIGHLIGHT_PAGE_CHANGED',
+    url: String(url || ''),
+  }).catch(() => {
+    // Content script na stránce ještě není / neposlouchá.
+  });
+}
+
+if (chrome.webNavigation?.onHistoryStateUpdated) {
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    if (details.frameId !== 0) {
+      return;
+    }
+    notifyTabHighlightNavigation(details.tabId, details.url);
+  });
+}
 const rateLimitBuckets = new Map();
 let activeUserLookups = 0;
 let appTabId = null;
@@ -624,7 +653,9 @@ async function lookupWord(word, options = {}) {
   const cardStatus = card ? normalizeStatus(card.status, card.extended_status) : 0;
 
   let result;
-  if (card && cardStatus > 1) {
+  if (card && cardStatus === -1) {
+    result = await attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
+  } else if (card && cardStatus > 1) {
     result = await attachMeanings(cardResult(cleanWord, card, settings), cleanWord, settings);
   } else if (await isKnownWord(cleanWord, settings)) {
     const hint = card ? null : await findHint(cleanWord, settings).catch(() => null);
@@ -753,7 +784,8 @@ async function lookupWordOffline(word, settings) {
     }, settings);
     const row = touched || existing;
     const translation = String(row.translation || existing.translation || '').trim() || bt('err.noTranslation');
-    const status = Number(row.status) || Number(existing.status) || 1;
+    const rawStatus = Number(row.status ?? existing.status);
+    const status = Number.isInteger(rawStatus) ? rawStatus : 1;
     return {
       word: cleanWord,
       translation,
@@ -761,8 +793,9 @@ async function lookupWordOffline(word, settings) {
       status,
       cardId: row.lingq_card_id ?? existing.lingq_card_id ?? null,
       created: false,
-      unknown: status <= 1,
-      viewCount: Number(row.view_count) > 1 ? Number(row.view_count) : null,
+      // Úroveň 1 je učení, ne „nové neznámé“ — modrá bublina jen u opravdu nových slov.
+      unknown: false,
+      viewCount: status === -1 ? null : (Number(row.view_count) > 1 ? Number(row.view_count) : null),
       alternativesSource: 'chatgpt',
     };
   }
@@ -1290,7 +1323,10 @@ async function updateStatus(cardId, status, word, translation = '') {
     method: 'PUT',
     body: JSON.stringify(body),
   });
-  const savedStatus = normalizeStatus(response?.status ?? apiStatus, response?.extended_status ?? body.extended_status);
+  const requestedStatus = Number(status);
+  const savedStatus = requestedStatus === -1
+    ? -1
+    : normalizeStatus(response?.status ?? apiStatus, response?.extended_status ?? body.extended_status);
   if (word) {
     if (savedStatus === 5) {
       rememberKnownWord(word, settings);
@@ -1395,6 +1431,9 @@ async function createHint(word, text, settings) {
 
 function toApiStatus(status) {
   const uiStatus = Number(status);
+  if (uiStatus === -1) {
+    return { apiStatus: -1, body: { status: -1, extended_status: null } };
+  }
   if (!Number.isInteger(uiStatus) || uiStatus < 1 || uiStatus > 5) {
     throw new Error(bt('err.lingqBadStatus'));
   }
@@ -1561,9 +1600,15 @@ async function findCard(word, settings) {
 }
 
 function bestCard(results, word) {
-  const matches = results.filter((card) => cardMatches(card, word) && Number(card.status) !== -1);
-  matches.sort((left, right) => normalizeStatus(right.status, right.extended_status) - normalizeStatus(left.status, left.extended_status));
-  return matches[0] || null;
+  const matches = results.filter((card) => cardMatches(card, word));
+  const active = matches.filter((card) => Number(card.status) !== -1);
+  const pool = active.length > 0 ? active : matches;
+  pool.sort((left, right) => {
+    const leftStatus = normalizeStatus(left.status, left.extended_status);
+    const rightStatus = normalizeStatus(right.status, right.extended_status);
+    return rightStatus - leftStatus;
+  });
+  return pool[0] || null;
 }
 
 function cardMatches(card, word) {
@@ -1730,7 +1775,24 @@ async function setKnownWordsSyncProgress(progress) {
 function rememberVocabularyEntry(map, word, status, meta = {}) {
   const text = String(word || '').trim().toLowerCase();
   const level = Number(status);
-  if (!text || !Number.isInteger(level) || level < 1 || level > 5) {
+  if (!text || !Number.isInteger(level) || (level !== -1 && (level < 1 || level > 5))) {
+    return;
+  }
+  if (level === -1) {
+    const meaning = String(meta.translation || '').replace(/\s+/g, ' ').trim() || null;
+    const importance = Number.isInteger(Number(meta.importance)) ? Number(meta.importance) : null;
+    const popularity = Number.isInteger(Number(meta.popularity)) ? Number(meta.popularity) : null;
+    const previous = map.get(text);
+    // Ignored přebije učení jen když už v dávce není silnější aktivní stav.
+    if (previous && previous.status >= 1) {
+      return;
+    }
+    map.set(text, {
+      status: -1,
+      translation: meaning || previous?.translation || null,
+      importance: importance ?? previous?.importance ?? null,
+      popularity: popularity ?? previous?.popularity ?? null,
+    });
     return;
   }
   const meaning = String(meta.translation || '').replace(/\s+/g, ' ').trim() || null;
@@ -1855,7 +1917,7 @@ async function fetchLingqCardsTotal(settings) {
     page_size: '1',
     sort: 'alpha',
   });
-  [0, 1, 2, 3, 4].forEach((status) => params.append('status', String(status)));
+  [-1, 0, 1, 2, 3, 4].forEach((status) => params.append('status', String(status)));
   const response = await lingqRequest(`${getApiBase(settings)}/cards/?${params}`, settings, { method: 'GET' });
   return Number(response?.count) || 0;
 }
@@ -1915,7 +1977,7 @@ function cardsListUrl(settings, page) {
     page_size: String(CARDS_IMPORT_PAGE_SIZE),
     sort: 'alpha',
   });
-  [0, 1, 2, 3, 4].forEach((status) => params.append('status', String(status)));
+  [-1, 0, 1, 2, 3, 4].forEach((status) => params.append('status', String(status)));
   return `${getApiBase(settings)}/cards/?${params}`;
 }
 
@@ -1960,9 +2022,6 @@ async function fetchNextCardsBatch(settings, progress, { onProgress } = {}) {
     }
 
     cards.forEach((card) => {
-      if (Number(card?.status) === -1) {
-        return;
-      }
       const term = String(card?.term || '').trim();
       if (!term) {
         return;
@@ -2482,14 +2541,23 @@ function getHintsBase(settings) {
 }
 
 function normalizeStatus(status, extendedStatus) {
-  if (typeof status === 'string' && status.toLowerCase() === 'known') {
-    return 5;
+  if (typeof status === 'string') {
+    const named = status.toLowerCase();
+    if (named === 'known') {
+      return 5;
+    }
+    if (named === 'ignored' || named === 'ignore') {
+      return -1;
+    }
   }
 
   const numericStatus = Number(status);
   const extended = extendedStatus == null || extendedStatus === '' ? null : Number(extendedStatus);
   if (!Number.isInteger(numericStatus)) {
     return 1;
+  }
+  if (numericStatus === -1) {
+    return -1;
   }
   if (numericStatus === 4 || (numericStatus === 3 && extended === 3)) {
     return 5;
@@ -2540,6 +2608,9 @@ function highlightMergePriority(status) {
   const value = Number(status);
   if (value === 5) {
     return 300; // K — nejvyšší priorita, nikdy nepřepsat učením
+  }
+  if (value === -1) {
+    return 250; // Ignored — bez barvy, nepřepsat žlutou
   }
   if (value === 6) {
     return 200; // v DB bez překladu
@@ -2603,7 +2674,7 @@ function queueSupabaseUpdate(fields, settings) {
   }).catch(() => {});
 }
 
-const EXTENSION_SCHEMA_VERSION = '4';
+const EXTENSION_SCHEMA_VERSION = '5';
 const SUPABASE_INSTALL_SQL_FILES = [
   'supabase/schema.sql',
   'supabase/import_known_words.sql',
@@ -2611,6 +2682,7 @@ const SUPABASE_INSTALL_SQL_FILES = [
   'supabase/latency.sql',
   'supabase/latency_status_phrase.sql',
   'supabase/lingq_offline_sync.sql',
+  'supabase/ignored_status.sql',
   'supabase/schema_version.sql',
 ];
 function supabaseDbRequiredMessage() {
@@ -3125,14 +3197,14 @@ async function getHighlightWordMap({ force = false } = {}) {
       }
       for (const row of rows) {
         const status = Number(row.status);
-        if (!Number.isInteger(status) || status < 1 || status > 5) {
+        if (!Number.isInteger(status) || (status !== -1 && (status < 1 || status > 5))) {
           continue;
         }
         const hasTranslation = Boolean(String(row.translation || '').trim());
-        // K vždy jako 5 (bez barvy). Jinak bez překladu = 6 (bez barvy), 1–4 = žlutá.
+        // K / Ignored bez barvy. Jinak bez překladu = 6 (bez barvy), 1–4 = žlutá.
         let mapped;
-        if (status === 5) {
-          mapped = 5;
+        if (status === 5 || status === -1) {
+          mapped = status;
         } else if (!hasTranslation) {
           mapped = HIGHLIGHT_SKIP_NO_TRANSLATION;
         } else {
@@ -3147,8 +3219,9 @@ async function getHighlightWordMap({ force = false } = {}) {
     }
   }
 
-  // Nejdřív všechna K, ať se neutnou limitem za učícími slovíčky.
+  // Nejdřív K a Ignored, ať se neutnou limitem za učícími slovíčky.
   await fetchHighlightPages('eq.5');
+  await fetchHighlightPages('eq.-1');
   await fetchHighlightPages('in.(1,2,3,4)');
 
   highlightMapCache = { language, at: now, words };
@@ -3167,6 +3240,7 @@ async function countSupabaseWords() {
   const params = new URLSearchParams({
     select: 'id',
     language: `eq.${language}`,
+    status: 'in.(1,2,3,4,5)',
   });
   const response = await fetch(`${baseUrl}/rest/v1/words?${params}`, {
     method: 'HEAD',
@@ -3202,6 +3276,9 @@ function buildWordsFilterParams({
   const statusNum = Number(status);
   if (Number.isInteger(statusNum) && statusNum >= 1 && statusNum <= 5) {
     params.append('status', `eq.${statusNum}`);
+  } else {
+    // Ignored (−1) se ve slovníku neukazuje.
+    params.append('status', 'in.(1,2,3,4,5)');
   }
 
   if (mode === 'top') {
@@ -3784,10 +3861,13 @@ function latencyWordStatus(result) {
   if (!result) {
     return null;
   }
+  const status = Number(result.status);
+  if (status === -1) {
+    return null;
+  }
   if (result.created === true) {
     return 'new';
   }
-  const status = Number(result.status);
   if (status === 5) {
     return 'K';
   }

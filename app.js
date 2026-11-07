@@ -2201,6 +2201,9 @@ function deleteWord(item, row, button) {
 
 function formatStatus(status) {
   const value = Number(status);
+  if (value === -1) {
+    return 'I';
+  }
   if (value === 5) {
     return 'K';
   }

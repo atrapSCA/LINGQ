@@ -70,61 +70,88 @@
 
 #lingq-click-translator-tooltip .lingq-tooltip__levels {
   display: flex;
-  gap: 5px;
+  align-items: center;
+  gap: 8px;
   margin-top: 12px;
-  padding-top: 10px;
+  padding-top: 12px;
+  padding-bottom: 2px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 #lingq-click-translator-tooltip .lingq-level {
-  min-width: 30px;
-  height: 27px;
-  padding: 0 7px;
-  border: 1px solid #62727a;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid transparent;
   border-radius: 999px;
-  background: transparent;
-  color: #dbe5e8;
+  background: #62727a;
+  color: #18222b;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  line-height: 25px;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  line-height: 1;
+  opacity: 0.55;
+  transform: scale(0.92);
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, opacity 140ms ease, transform 140ms ease;
 }
 
-#lingq-click-translator-tooltip .lingq-level:hover:not(:disabled) {
-  border-color: #8bd7c4;
-  color: #ffffff;
+#lingq-click-translator-tooltip .lingq-level svg {
+  display: block;
 }
 
-#lingq-click-translator-tooltip .lingq-level--active {
-  border-color: #4dbea0;
-  background: #4dbea0;
-  color: #18222b;
+#lingq-click-translator-tooltip .lingq-level--ignored {
+  background: #f3b6b0;
+  color: #2a1614;
+}
+
+#lingq-click-translator-tooltip .lingq-level--level[data-status="1"] {
+  background: #f2c84b;
+}
+
+#lingq-click-translator-tooltip .lingq-level--level[data-status="2"] {
+  background: #f6e08a;
+}
+
+#lingq-click-translator-tooltip .lingq-level--level[data-status="3"] {
+  background: #f4efe0;
+}
+
+#lingq-click-translator-tooltip .lingq-level--level[data-status="4"] {
+  background: #d7dde8;
 }
 
 #lingq-click-translator-tooltip .lingq-level--known {
-  min-width: 34px;
-  border-color: #f0b84e;
-  background: transparent;
-  color: #f0b84e;
+  background: #b7e0b2;
+  color: #143018;
 }
 
-#lingq-click-translator-tooltip .lingq-level--known.lingq-level--active {
-  border-color: #f0b84e;
-  background: #f0b84e;
-  color: #18222b;
+#lingq-click-translator-tooltip .lingq-level:hover:not(:disabled):not(.lingq-level--active) {
+  opacity: 0.85;
+  transform: scale(0.98);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.28);
 }
 
-#lingq-click-translator-tooltip .lingq-level--known:hover:not(:disabled) {
-  border-color: #f0b84e;
-  background: #f0b84e;
-  color: #18222b;
+#lingq-click-translator-tooltip .lingq-level--active {
+  width: 34px;
+  height: 34px;
+  opacity: 1;
+  transform: scale(1);
+  border-color: #18222b;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.92),
+    0 0 0 5px rgba(24, 34, 43, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+  font-size: 13px;
 }
 
 #lingq-click-translator-tooltip .lingq-level:disabled {
   cursor: wait;
-  opacity: 0.6;
+  opacity: 0.45;
 }
 
 #lingq-click-translator-tooltip .lingq-tooltip__alternatives {
@@ -327,15 +354,15 @@
   border-top-color: rgba(24, 110, 168, 0.22);
 }
 
-#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level {
-  border-color: #7eb6d6;
-  color: #1a4f73;
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level:hover:not(:disabled):not(.lingq-level--active) {
+  box-shadow: 0 0 0 2px rgba(29, 122, 184, 0.35);
 }
 
-#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level:hover:not(:disabled) {
-  border-color: #1d7ab8;
-  background: #b9e4fb;
-  color: #0d3f60;
+#lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-level--active {
+  box-shadow:
+    0 0 0 3px #ffffff,
+    0 0 0 5px rgba(13, 63, 96, 0.55),
+    0 2px 8px rgba(13, 63, 96, 0.22);
 }
 
 #lingq-click-translator-tooltip.lingq-tooltip--unknown .lingq-tooltip__alternatives {
@@ -407,31 +434,19 @@
 }
 
 #lingq-click-translator-tooltip[data-theme="light"] .lingq-level {
-  border-color: #c9d6d2;
-  color: #294049;
+  color: #18222b;
 }
 
-#lingq-click-translator-tooltip[data-theme="light"] .lingq-level:hover:not(:disabled) {
-  border-color: #1f7f68;
-  color: #18222b;
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-level:hover:not(:disabled):not(.lingq-level--active) {
+  box-shadow: 0 0 0 2px rgba(24, 34, 43, 0.14);
 }
 
 #lingq-click-translator-tooltip[data-theme="light"] .lingq-level--active {
-  border-color: #4dbea0;
-  background: #4dbea0;
-  color: #102c2c;
-}
-
-#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known {
-  border-color: #d4a017;
-  color: #8a5a00;
-}
-
-#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known.lingq-level--active,
-#lingq-click-translator-tooltip[data-theme="light"] .lingq-level--known:hover:not(:disabled) {
-  border-color: #f0b84e;
-  background: #f0b84e;
-  color: #18222b;
+  border-color: #18222b;
+  box-shadow:
+    0 0 0 3px #ffffff,
+    0 0 0 5px rgba(24, 34, 43, 0.5),
+    0 2px 8px rgba(24, 34, 43, 0.2);
 }
 
 #lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__alternatives {
@@ -524,9 +539,100 @@ span.lingq-hl--4 {
   background-color: rgba(255, 240, 150, 0.16) !important;
 }
 
-a span.lingq-hl,
-a[href] span.lingq-hl,
-[role="link"] span.lingq-hl {
+/* Odkazy nesmí zůstat podbarvené (i když DOM vznikne až po highlightu). */
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl,
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl--new,
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl--1,
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl--2,
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl--3,
+:is(a, a[href], area, [role="link"], [href]) span.lingq-hl--4 {
+  background: none !important;
   background-color: transparent !important;
-  padding: 0;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Fixní pruh nahoře — mimo tok stránky, nepřesouvá layout. */
+#lingq-highlight-busy {
+  all: initial;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 2px solid #2f9f82;
+  border-radius: 0;
+  background: #14352e;
+  box-shadow: 0 8px 24px rgba(8, 15, 22, 0.28);
+  color: #ffffff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-100%);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+#lingq-highlight-busy.lingq-highlight-busy--visible {
+  display: flex !important;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#lingq-highlight-busy .lingq-highlight-busy__dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #4dbea0;
+  box-shadow: 0 0 0 0 rgba(77, 190, 160, 0.65);
+  animation: lingq-highlight-busy-dot 1s ease-out infinite;
+}
+
+#lingq-highlight-busy .lingq-highlight-busy__text {
+  display: block;
+  color: #ffffff;
+  font: inherit;
+}
+
+#lingq-highlight-busy .lingq-highlight-busy__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, #7decc8, transparent);
+  animation: lingq-highlight-busy-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes lingq-highlight-busy-dot {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(77, 190, 160, 0.65);
+  }
+  70% {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 10px rgba(77, 190, 160, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(77, 190, 160, 0);
+  }
+}
+
+@keyframes lingq-highlight-busy-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
 }
