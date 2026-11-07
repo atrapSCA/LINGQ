@@ -68,6 +68,7 @@
       ['data-i18n-placeholder', 'placeholder'],
       ['data-i18n-title', 'title'],
       ['data-i18n-aria-label', 'aria-label'],
+      ['data-i18n-alt', 'alt'],
       ['data-i18n-value', 'value'],
     ].forEach(([dataAttr, attrName]) => {
       const attrKey = el.getAttribute(dataAttr);
@@ -83,7 +84,7 @@
     }
     const scope = root || document;
     scope
-      .querySelectorAll('[data-i18n], [data-i18n-placeholder], [data-i18n-title], [data-i18n-aria-label], [data-i18n-value]')
+      .querySelectorAll('[data-i18n], [data-i18n-placeholder], [data-i18n-title], [data-i18n-aria-label], [data-i18n-alt], [data-i18n-value]')
       .forEach(applyToElement);
     document.documentElement.lang = currentLocale;
   }

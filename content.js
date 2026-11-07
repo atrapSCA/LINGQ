@@ -3,7 +3,7 @@ const WORD_PATTERN = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/u;
 const STATUS_LEVELS = [['1', 1], ['2', 2], ['3', 3], ['4', 4], ['K', 5]];
 const USER_PHRASE_WORD_LIMIT = 10;
 let enabled = true;
-let clickCount = 1;
+let clickCount = 2;
 let sourceLanguage = 'en';
 let targetLanguage = 'cs';
 let uiTheme = 'light';
@@ -47,7 +47,7 @@ function normalizePhraseSource(value) {
 
 chrome.storage.sync.get({
   enabled: true,
-  clickCount: 1,
+  clickCount: 2,
   language: 'en',
   targetLanguage: 'cs',
   theme: 'light',

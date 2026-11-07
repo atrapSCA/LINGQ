@@ -1,5 +1,5 @@
 const DEFAULTS = {
-  apiKey: 'd59c2650c569e8f6aba883b9d4fb48826d1b1d25',
+  apiKey: '',
   language: 'en',
   targetLanguage: 'cs',
   enabled: true,

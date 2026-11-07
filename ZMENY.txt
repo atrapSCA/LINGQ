@@ -277,6 +277,15 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.4
+7. 11. 2026 11:40
+- Stabilní user release: veřejný build bez admin role; výchozí LingQ/ChatGPT/Supabase klíče v kódu prázdné.
+- Slovník: filtr podle písmene (Top / A–Z / #) s lazy loadem; bez načítání celého slovníku najednou.
+- Bez Supabase DB: náhledy Slovníku, Statistik a Odezvy + lightbox; jednotný banner „premium LingQ“.
+- Pořadí záložek: Nastavení před Importem; právní MIT disclaimer jen na Návodu; výchozí dvojklik.
+- Oprava layoutu Nastavení: přepínač Supabase DB už neschová hlavní menu.
+- Licence MIT (LICENSE); náhledové obrázky v images/.
+
 Verze 0.3.3
 6. 11. 2026 23:14
 - Stabilní release: vícejazyčné rozhraní (cs / en / de / fr / es); texty UI oddělené do locales/*.json.

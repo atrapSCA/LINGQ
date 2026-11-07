@@ -19,13 +19,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 const DEFAULTS = {
-  apiKey: 'd59c2650c569e8f6aba883b9d4fb48826d1b1d25',
+  apiKey: '',
   language: 'en',
   targetLanguage: 'cs',
   enabled: true,
   theme: 'light',
   uiLocale: 'en',
-  clickCount: 1,
+  clickCount: 2,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,
   chatgptApiKey: '',
@@ -295,10 +295,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'COUNT_SUPABASE_WORDS') {
+    requireSupabaseReady()
+      .then(() => countSupabaseWords())
+      .then((total) => sendResponse({ ok: true, total }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
+    return true;
+  }
+
+  if (message.type === 'LIST_SUPABASE_WORDS_FILTER') {
+    requireSupabaseReady()
+      .then(() => listSupabaseWordsByFilter(message))
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
+    return true;
+  }
+
   if (message.type === 'LIST_SUPABASE_WORDS') {
     requireSupabaseReady()
       .then(() => listSupabaseWords())
       .then((words) => sendResponse({ ok: true, words }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
+    return true;
+  }
+
+  if (message.type === 'LIST_SUPABASE_WORDS_PAGE') {
+    requireSupabaseReady()
+      .then(() => listSupabaseWordsPage(message.offset, message.limit))
+      .then((page) => sendResponse({ ok: true, ...page }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
     return true;
   }
@@ -2784,35 +2808,229 @@ async function cleanupSchemaProbeWords(baseUrl, apiKey) {
   }).catch(() => {});
 }
 
-async function listSupabaseWords() {
+const WORDS_PAGE_SIZE = 500;
+const WORDS_SELECT = 'id,word,view_count,status,translation,language,lingq_card_id,importance,popularity,import_note,created_at,updated_at';
+
+function escapePostgrestFilterValue(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+    .replace(/\*/g, '')
+    .replace(/,/g, ' ')
+    .replace(/[()]/g, '');
+}
+
+async function getSupabaseWordsClient() {
   const settings = await chrome.storage.sync.get(DEFAULTS);
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
     throw new Error(bt('import.err.needSupabase'));
   }
+  return {
+    settings,
+    baseUrl,
+    apiKey,
+    language: settings.language || 'en',
+  };
+}
 
-  const language = encodeURIComponent(settings.language || 'en');
-  const url = `${baseUrl}/rest/v1/words?select=word,view_count,status,translation,language,lingq_card_id,importance,popularity,import_note,created_at,updated_at&language=eq.${language}&order=word.asc&limit=2000`;
-  const response = await fetch(url, {
-    method: 'GET',
+async function countSupabaseWords() {
+  const { baseUrl, apiKey, language } = await getSupabaseWordsClient();
+  const params = new URLSearchParams({
+    select: 'id',
+    language: `eq.${language}`,
+  });
+  const response = await fetch(`${baseUrl}/rest/v1/words?${params}`, {
+    method: 'HEAD',
     headers: {
       apikey: apiKey,
       Authorization: `Bearer ${apiKey}`,
+      Prefer: 'count=exact',
+    },
+  });
+  if (!response.ok && response.status !== 206) {
+    throw new Error(bt('err.supabaseHttp', { status: response.status }));
+  }
+  const contentRange = response.headers.get('content-range') || '';
+  const totalMatch = contentRange.match(/\/(\d+)$/);
+  return totalMatch ? Number(totalMatch[1]) : 0;
+}
+
+function buildWordsFilterParams({
+  language,
+  mode,
+  letter,
+  query,
+  status,
+  order,
+  limit,
+  offset,
+}) {
+  const params = new URLSearchParams({
+    select: WORDS_SELECT,
+    language: `eq.${language || 'en'}`,
+  });
+
+  const statusNum = Number(status);
+  if (Number.isInteger(statusNum) && statusNum >= 1 && statusNum <= 5) {
+    params.append('status', `eq.${statusNum}`);
+  }
+
+  if (mode === 'top') {
+    params.set('order', order || 'view_count.desc.nullslast,word.asc');
+    params.set('limit', String(limit || 200));
+    params.set('offset', String(offset || 0));
+    return params;
+  }
+
+  if (mode === 'search') {
+    const needle = escapePostgrestFilterValue(query).trim();
+    if (needle.length < 1) {
+      throw new Error(bt('words.loadFailed'));
+    }
+    params.set('or', `(word.ilike.*${needle}*,translation.ilike.*${needle}*)`);
+    params.set('order', order || 'word.asc,id.asc');
+    params.set('limit', String(limit || WORDS_PAGE_SIZE));
+    params.set('offset', String(offset || 0));
+    return params;
+  }
+
+  const key = String(letter || '').toUpperCase();
+  if (key === '#') {
+    const parts = [...'abcdefghijklmnopqrstuvwxyz'].map((ch) => `word.not.ilike.${ch}*`);
+    params.set('and', `(${parts.join(',')})`);
+  } else if (/^[A-Z]$/.test(key)) {
+    params.set('word', `ilike.${key.toLowerCase()}*`);
+  } else {
+    throw new Error(bt('words.loadFailed'));
+  }
+  params.set('order', order || 'word.asc,id.asc');
+  params.set('limit', String(limit || WORDS_PAGE_SIZE));
+  params.set('offset', String(offset || 0));
+  return params;
+}
+
+async function fetchSupabaseWordsPage(client, params) {
+  const response = await fetch(`${client.baseUrl}/rest/v1/words?${params}`, {
+    method: 'GET',
+    headers: {
+      apikey: client.apiKey,
+      Authorization: `Bearer ${client.apiKey}`,
       Accept: 'application/json',
+      Prefer: 'count=exact',
     },
   });
 
-  if (!response.ok) {
+  if (!response.ok && response.status !== 206) {
     throw new Error(bt('err.supabaseHttp', { status: response.status }));
   }
 
   const rows = await response.json();
-  const list = Array.isArray(rows) ? rows : [];
-  if (list.some((row) => isSchemaProbeWord(row?.word))) {
-    void cleanupSchemaProbeWords(baseUrl, apiKey);
+  const batch = Array.isArray(rows) ? rows : [];
+  if (batch.some((row) => isSchemaProbeWord(row?.word))) {
+    void cleanupSchemaProbeWords(client.baseUrl, client.apiKey);
   }
-  return list.filter((row) => !isSchemaProbeWord(row?.word));
+
+  const words = batch.filter((row) => !isSchemaProbeWord(row?.word));
+  const contentRange = response.headers.get('content-range') || '';
+  const totalMatch = contentRange.match(/\/(\d+)$/);
+  const total = totalMatch ? Number(totalMatch[1]) : null;
+  const pageOffset = Number(params.get('offset') || 0);
+  const pageSize = Number(params.get('limit') || WORDS_PAGE_SIZE);
+  const nextOffset = pageOffset + batch.length;
+  const done = batch.length < pageSize || (total != null && nextOffset >= total);
+
+  return { words, total, nextOffset, pageSize, done, rawCount: batch.length };
+}
+
+async function listSupabaseWordsByFilter(options = {}) {
+  const client = await getSupabaseWordsClient();
+  const mode = String(options.mode || 'letter');
+  const maxRows = mode === 'top'
+    ? Math.min(500, Math.max(1, Number(options.limit) || 200))
+    : mode === 'search'
+      ? Math.min(500, Math.max(1, Number(options.limit) || 200))
+      : 20000;
+
+  const list = [];
+  let offset = 0;
+  let total = null;
+  let guard = 0;
+
+  while (guard < 80) {
+    guard += 1;
+    const pageLimit = mode === 'top' || mode === 'search'
+      ? maxRows
+      : WORDS_PAGE_SIZE;
+    const params = buildWordsFilterParams({
+      language: client.language,
+      mode,
+      letter: options.letter,
+      query: options.query,
+      status: options.status,
+      order: options.order,
+      limit: pageLimit,
+      offset,
+    });
+
+    const page = await fetchSupabaseWordsPage(client, params);
+    list.push(...page.words);
+    if (page.total != null) {
+      total = page.total;
+    }
+    if (mode === 'top' || mode === 'search' || page.done || list.length >= maxRows) {
+      break;
+    }
+    offset = page.nextOffset;
+  }
+
+  return {
+    words: list.slice(0, maxRows),
+    total: total != null ? total : list.length,
+    mode,
+    letter: options.letter || null,
+    query: options.query || null,
+  };
+}
+
+async function listSupabaseWordsPage(offset = 0, limit = WORDS_PAGE_SIZE) {
+  const client = await getSupabaseWordsClient();
+  const pageSize = Math.min(1000, Math.max(1, Number(limit) || WORDS_PAGE_SIZE));
+  const pageOffset = Math.max(0, Number(offset) || 0);
+  const params = new URLSearchParams({
+    select: WORDS_SELECT,
+    language: `eq.${client.language}`,
+    order: 'word.asc,id.asc',
+    limit: String(pageSize),
+    offset: String(pageOffset),
+  });
+  const page = await fetchSupabaseWordsPage(client, params);
+  return {
+    words: page.words,
+    offset: pageOffset,
+    nextOffset: page.nextOffset,
+    pageSize: page.pageSize,
+    total: page.total,
+    done: page.done,
+  };
+}
+
+async function listSupabaseWords() {
+  const list = [];
+  let offset = 0;
+  let guard = 0;
+  while (guard < 400) {
+    guard += 1;
+    const page = await listSupabaseWordsPage(offset, WORDS_PAGE_SIZE);
+    list.push(...page.words);
+    if (page.done) {
+      break;
+    }
+    offset = page.nextOffset;
+  }
+  return list;
 }
 
 async function deleteWordEverywhere(word, cardId = null) {

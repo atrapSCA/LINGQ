@@ -9,31 +9,39 @@
   </head>
   <body>
     <main class="panel">
-      <header class="header">
-        <div class="brand-mark">LQ</div>
-        <div>
-          <h1>LingQ Click Translator</h1>
-          <p data-i18n="app.subtitle">Slovník, statistiky, import a nastavení na celé stránce</p>
-        </div>
-      </header>
+      <div class="panel__chrome">
+        <header class="header">
+          <div class="brand-mark">LQ</div>
+          <div>
+            <h1>LingQ Click Translator</h1>
+            <p data-i18n="app.subtitle">Slovník, statistiky, import a nastavení na celé stránce</p>
+          </div>
+        </header>
 
-      <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
-        <button class="tab tab--active" type="button" role="tab" id="tab-words" aria-selected="true" aria-controls="panel-words" data-tab="words" data-i18n="tab.words">Slovník</button>
-        <button class="tab" type="button" role="tab" id="tab-import" aria-selected="false" aria-controls="panel-import" data-tab="import" data-i18n="tab.import">Import</button>
-        <button class="tab" type="button" role="tab" id="tab-stats" aria-selected="false" aria-controls="panel-stats" data-tab="stats" data-i18n="tab.stats">Statistiky</button>
-        <button class="tab" type="button" role="tab" id="tab-latency" aria-selected="false" aria-controls="panel-latency" data-tab="latency" data-i18n="tab.latency">Odezva</button>
-        <button class="tab" type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-tab="settings" data-i18n="tab.settings">Nastavení</button>
-        <button class="tab" type="button" role="tab" id="tab-author" aria-selected="false" aria-controls="panel-author" data-tab="author" data-i18n="tab.guide">Návod</button>
-      </nav>
+        <nav class="tabs" role="tablist" aria-label="Sekce doplňku">
+          <button class="tab tab--active" type="button" role="tab" id="tab-words" aria-selected="true" aria-controls="panel-words" data-tab="words" data-i18n="tab.words">Slovník</button>
+          <button class="tab" type="button" role="tab" id="tab-stats" aria-selected="false" aria-controls="panel-stats" data-tab="stats" data-i18n="tab.stats">Statistiky</button>
+          <button class="tab" type="button" role="tab" id="tab-latency" aria-selected="false" aria-controls="panel-latency" data-tab="latency" data-i18n="tab.latency">Odezva</button>
+          <button class="tab" type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-tab="settings" data-i18n="tab.settings">Nastavení</button>
+          <button class="tab" type="button" role="tab" id="tab-import" aria-selected="false" aria-controls="panel-import" data-tab="import" data-i18n="tab.import">Import</button>
+          <button class="tab" type="button" role="tab" id="tab-author" aria-selected="false" aria-controls="panel-author" data-tab="author" data-i18n="tab.guide">Návod</button>
+        </nav>
 
-      <aside class="schema-alert" id="schema-alert" hidden role="alert">
-        <div class="schema-alert__body">
-          <strong class="schema-alert__title" data-i18n="schema.title">Aktualizujte databázi</strong>
-          <p class="schema-alert__text" id="schema-alert-text" data-i18n="schema.text">Doplněk vyžaduje novější schéma Supabase. Bez aktualizace nebude řádně fungovat.</p>
-        </div>
-        <button type="button" class="schema-alert__button" id="schema-alert-open-settings" data-i18n="schema.openSettings">Otevřít Nastavení</button>
-      </aside>
+        <aside class="schema-alert" id="schema-alert" hidden role="alert">
+          <div class="schema-alert__body">
+            <strong class="schema-alert__title" data-i18n="schema.title">Aktualizujte databázi</strong>
+            <p class="schema-alert__text" id="schema-alert-text" data-i18n="schema.text">Doplněk vyžaduje novější schéma Supabase. Bez aktualizace nebude řádně fungovat.</p>
+          </div>
+          <button type="button" class="schema-alert__button" id="schema-alert-open-settings" data-i18n="schema.openSettings">Otevřít Nastavení</button>
+        </aside>
 
+        <aside class="db-mode-alert" id="db-mode-alert" hidden role="status">
+          <strong class="db-mode-alert__title" data-i18n="db.modeLingqOnlyTitle">Režim bez Supabase DB</strong>
+          <p class="db-mode-alert__text" data-i18n="db.modeLingqOnly">Doplněk v současné době pracuje pouze s premium účtem LingQ. Pokud použijete Supabase DB a ChatGPT, bude doplněk fungovat i bez účtu LingQ.</p>
+        </aside>
+      </div>
+
+      <div class="panel__content">
       <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
         <form id="settings-form" class="settings-form">
           <div class="settings-form__body">
@@ -74,7 +82,7 @@
             <label for="click-count" data-i18n="settings.bubbleAfter">Bublina vyskočí po</label>
             <select id="click-count">
               <option value="1" data-i18n="settings.click1">jednom kliknutí myši na slovo</option>
-              <option value="2" data-i18n="settings.click2">dvou kliknutích myší na slovo</option>
+              <option value="2" selected data-i18n="settings.click2">dvou kliknutích myší na slovo</option>
             </select>
             <p class="help" id="click-help" data-i18n="settings.clickHelp1">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
 
@@ -214,8 +222,14 @@
 
       <section class="tab-panel" id="panel-words" role="tabpanel" aria-labelledby="tab-words">
         <div class="db-gate" data-db-gate hidden>
-          <p class="db-gate__title" data-i18n="words.gateTitle">Slovník vyžaduje Supabase</p>
-          <p class="db-gate__text" data-i18n="words.gateText">Zapněte Supabase DB v Nastavení, vyplňte URL a klíč, nainstalujte schéma a ověřte tlačítkem Zkontrolovat databázi.</p>
+          <p class="db-gate__title" data-i18n="words.gateTitle">Slovník vyžaduje Supabase DB (databázi)</p>
+          <p class="db-gate__text" data-i18n="words.gateText">Aby slovník fungoval, musíte v Nastavení zapnout Supabase DB, vyplnit URL a klíč, nainstalovat schéma DB a vše ověřit tlačítkem „Zkontrolovat databázi“ (více detailů najdete v návodu).</p>
+          <figure class="db-gate__preview">
+            <button type="button" class="db-gate__preview-open" id="words-preview-open" aria-haspopup="dialog" data-i18n-aria-label="words.gatePreviewOpen">
+              <img src="images/words-preview.png" alt="Náhled slovníku se zapnutou Supabase DB" data-i18n-alt="words.gatePreviewAlt" width="1100" height="620" loading="lazy" decoding="async" />
+            </button>
+            <figcaption data-i18n="words.gatePreviewCaption">Náhled slovníku se zapnutou Supabase DB</figcaption>
+          </figure>
         </div>
         <div class="words-toolbar">
           <label class="sr-only" for="word-search" data-i18n="words.search">Hledat slovíčko</label>
@@ -238,6 +252,7 @@
               <option value="views-asc" data-i18n="words.sortViewsAsc">Nejméně kliknutí</option>
             </select>
           </div>
+          <div class="words-letters" id="words-letters" role="toolbar" aria-label="Filtr podle písmene" data-i18n-aria-label="words.lettersAria"></div>
         </div>
         <p class="words-meta" id="words-meta" data-i18n="words.loading">Načítám slovíčka…</p>
         <div class="words-list" id="words-list" role="list"></div>
@@ -245,8 +260,8 @@
 
       <section class="tab-panel" id="panel-import" role="tabpanel" aria-labelledby="tab-import" hidden>
         <div class="db-gate" data-db-gate hidden>
-          <p class="db-gate__title" data-i18n="import.gateTitle">Import vyžaduje Supabase</p>
-          <p class="db-gate__text" data-i18n="import.gateText">Bez zapnuté a připravené databáze nelze slovíčka z LingQ ukládat do DB. Zapněte Supabase v Nastavení a spusťte kontrolu.</p>
+          <p class="db-gate__title" data-i18n="import.gateTitle">Import vyžaduje Supabase DB (databázi)</p>
+          <p class="db-gate__text" data-i18n="import.gateText">Aby import fungoval, musíte v Nastavení zapnout Supabase DB, vyplnit URL a klíč, nainstalovat schéma DB a vše ověřit tlačítkem „Zkontrolovat databázi“ (více detailů najdete v návodu).</p>
         </div>
         <div class="words-import">
           <div class="import-progress" id="import-progress" hidden>
@@ -275,8 +290,14 @@
 
       <section class="tab-panel" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
         <div class="db-gate" data-db-gate hidden>
-          <p class="db-gate__title" data-i18n="stats.gateTitle">Statistiky vyžadují Supabase</p>
-          <p class="db-gate__text" data-i18n="stats.gateText">Zapněte Supabase DB v Nastavení, vyplňte údaje a ověřte, že schéma je nainstalované.</p>
+          <p class="db-gate__title" data-i18n="stats.gateTitle">Statistiky vyžadují Supabase DB (databázi)</p>
+          <p class="db-gate__text" data-i18n="stats.gateText">Aby statistika fungovala, musíte v Nastavení zapnout Supabase DB, vyplnit URL a klíč, nainstalovat schéma DB a vše ověřit tlačítkem „Zkontrolovat databázi“ (více detailů najdete v návodu).</p>
+          <figure class="db-gate__preview">
+            <button type="button" class="db-gate__preview-open" id="stats-preview-open" aria-haspopup="dialog" data-i18n-aria-label="stats.gatePreviewOpen">
+              <img src="images/stats-preview.png" alt="Náhled statistik se zapnutou Supabase DB" data-i18n-alt="stats.gatePreviewAlt" width="1100" height="720" loading="lazy" decoding="async" />
+            </button>
+            <figcaption data-i18n="stats.gatePreviewCaption">Náhled statistik se zapnutou Supabase DB</figcaption>
+          </figure>
         </div>
         <div class="stats-year-head">
           <h2 class="stats-year-title" id="stats-year-title">2026</h2>
@@ -305,8 +326,14 @@
 
       <section class="tab-panel" id="panel-latency" role="tabpanel" aria-labelledby="tab-latency" hidden>
         <div class="db-gate" data-db-gate hidden>
-          <p class="db-gate__title" data-i18n="latency.gateTitle">Odezva vyžaduje Supabase</p>
-          <p class="db-gate__text" data-i18n="latency.gateText">Měření odezvy se ukládá do databáze. Zapněte Supabase v Nastavení a zkontrolujte instalaci schématu.</p>
+          <p class="db-gate__title" data-i18n="latency.gateTitle">Odezva vyžaduje Supabase DB (databázi)</p>
+          <p class="db-gate__text" data-i18n="latency.gateText">Aby odezva fungovala, musíte v Nastavení zapnout Supabase DB, vyplnit URL a klíč, nainstalovat schéma DB a vše ověřit tlačítkem „Zkontrolovat databázi“ (více detailů najdete v návodu).</p>
+          <figure class="db-gate__preview">
+            <button type="button" class="db-gate__preview-open" id="latency-preview-open" aria-haspopup="dialog" data-i18n-aria-label="latency.gatePreviewOpen">
+              <img src="images/latency-preview.png" alt="Náhled odezvy se zapnutou Supabase DB" data-i18n-alt="latency.gatePreviewAlt" width="1100" height="720" loading="lazy" decoding="async" />
+            </button>
+            <figcaption data-i18n="latency.gatePreviewCaption">Náhled odezvy se zapnutou Supabase DB</figcaption>
+          </figure>
         </div>
         <p class="stats-meta" id="latency-meta" data-i18n="latency.loading">Načítám odezvu…</p>
         <section class="latency-chart-wrap" aria-label="Týdenní odezva LingQ">
@@ -354,8 +381,24 @@
           <p class="author-card__name">Karel Gajda</p>
           <a class="author-card__email" href="mailto:gajda.karel@gmail.com">gajda.karel@gmail.com</a>
         </div>
+
+        <div class="guide-card legal-notice" aria-labelledby="guide-legal-title">
+          <h2 class="guide-card__title" id="guide-legal-title" data-i18n="legal.title">Licence a vyloučení odpovědnosti</h2>
+          <p class="legal-notice__text" data-i18n="legal.free">Tento software je poskytován zcela zdarma, bez jakýchkoli poplatků za jeho používání či distribuci.</p>
+          <p class="legal-notice__text" data-i18n="legal.license">Software je šířen pod licencí MIT (soubor LICENSE v projektu). Uživatel smí software používat, upravovat a dále šířit v souladu s podmínkami této licence.</p>
+          <p class="legal-notice__text" data-i18n="legal.disclaimer">SOFTWARE JE POSKYTOVÁN „TAK, JAK JE“ (AS IS), BEZ JAKÉKOLI VÝSLOVNÉ NEBO IMPLICITNÍ ZÁRUKY, VČETNĚ ZÁRUK OBCHODOVATELNOSTI, VHODNOSTI PRO KONKRÉTNÍ ÚČEL A NEPORUŠENÍ PRÁV TŘETÍCH OSOB. AUTOR ANI DRŽITELÉ AUTORSKÝCH PRÁV NENESOU V ŽÁDNÉM PŘÍPADĚ ODPOVĚDNOST ZA JAKÉKOLI NÁROKY, ŠKODY NEBO JINÉ ZÁVAZKY, AŤ UŽ SMLUVNÍ, DELIKTNÍ ČI JINÉ, VZNIKLÉ ZE SOFTWARE, Z JEHO POUŽÍVÁNÍ NEBO V SOUVISLOSTI S NÍM. UŽIVATEL BERE NA VĚDOMÍ A VÝSLOVNĚ PŘIJÍMÁ, ŽE SOFTWARE POUŽÍVÁ NA VLASTNÍ NEBEZPEČÍ A ŽE ZA VEŠKERÉ PŘÍPADNÉ ŠKODY, ZTRÁTY DAT, NÁKLADY TŘETÍCH SLUŽEB (NAPŘ. LINGQ, OPENAI / CHATGPT, SUPABASE) ČI JINÉ NÁSLEDKY PŘEBÍRÁ PLNOU ODPOVĚDNOST.</p>
+        </div>
       </section>
+      </div>
     </main>
+    <div class="image-lightbox" id="image-lightbox" hidden>
+      <button type="button" class="image-lightbox__backdrop" id="image-lightbox-close" data-i18n-aria-label="preview.close" aria-label="Zavřít náhled"></button>
+      <div class="image-lightbox__dialog" role="dialog" aria-modal="true" aria-labelledby="image-lightbox-title">
+        <p class="sr-only" id="image-lightbox-title">Náhled</p>
+        <img id="image-lightbox-img" src="images/words-preview.png" alt="" />
+        <button type="button" class="image-lightbox__x" id="image-lightbox-x" data-i18n-aria-label="preview.close" aria-label="Zavřít náhled">×</button>
+      </div>
+    </div>
     <script src="theme.js"></script>
     <script src="i18n.js"></script>
     <script src="role.js"></script>

@@ -1,11 +1,11 @@
 const DEFAULTS = {
-  apiKey: 'd59c2650c569e8f6aba883b9d4fb48826d1b1d25',
+  apiKey: '',
   language: 'en',
   targetLanguage: 'cs',
   enabled: true,
   theme: 'light',
   uiLocale: 'en',
-  clickCount: 1,
+  clickCount: 2,
   latencyIdleMinSeconds: 60,
   latencyIdleMaxSeconds: 80,
   chatgptApiKey: '',
@@ -94,6 +94,19 @@ const wordStatusFilterInput = document.getElementById('word-status-filter');
 const wordSortInput = document.getElementById('word-sort');
 const wordsMeta = document.getElementById('words-meta');
 const wordsList = document.getElementById('words-list');
+const wordsLetters = document.getElementById('words-letters');
+const WORD_LETTER_KEYS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#'];
+const WORDS_TOP_RENDER_CAP = 200;
+const WORDS_SEARCH_LIMIT = 200;
+let wordLetterFilter = null;
+let wordsBucket = [];
+let wordsCache = new Map();
+let wordsLetterCounts = Object.create(null);
+let wordsEmptyLetters = new Set();
+let wordsTotalInDb = null;
+let wordsIndexReady = false;
+let wordsLoadToken = 0;
+let wordSearchTimer = null;
 const syncKnownWordsButton = document.getElementById('sync-known-words');
 const resetLingqImportButton = document.getElementById('reset-lingq-import');
 const importKnownStatus = document.getElementById('import-known-status');
@@ -125,7 +138,6 @@ function uiDateLocale() {
   return ({ cs: 'cs-CZ', en: 'en-US', de: 'de-DE', fr: 'fr-FR', es: 'es-ES' }[code]) || 'en-US';
 }
 
-let allWords = [];
 let wordsLoaded = false;
 let wordsLoading = false;
 let statsLoading = false;
@@ -137,6 +149,7 @@ let supabaseSchemaNeedsUpdate = false;
 const schemaAlert = document.getElementById('schema-alert');
 const schemaAlertText = document.getElementById('schema-alert-text');
 const schemaAlertOpenSettings = document.getElementById('schema-alert-open-settings');
+const dbModeAlert = document.getElementById('db-mode-alert');
 
 function t(key, vars) {
   return window.LingqI18n ? LingqI18n.t(key, vars) : key;
@@ -326,7 +339,7 @@ form.addEventListener('submit', async (event) => {
     latencyIdleMinInput.value = String(idleRange.latencyIdleMinSeconds);
     latencyIdleMaxInput.value = String(idleRange.latencyIdleMaxSeconds);
     formMessage.textContent = t('settings.saved');
-    wordsLoaded = false;
+    resetWordsCache();
     latencyLoaded = false;
     refreshSupabaseGate({ force: true });
     window.setTimeout(() => { formMessage.textContent = ''; }, 2200);
@@ -334,8 +347,10 @@ form.addEventListener('submit', async (event) => {
 });
 
 chatgptEnabledInput.addEventListener('change', () => {
+  const settingsScrollTop = getSettingsScrollBody()?.scrollTop;
   const chatgptEnabled = chatgptEnabledInput.checked;
   applyOptionalFeatureUi();
+  afterSettingsLayout(settingsScrollTop);
   if (!chatgptEnabled) {
     chatgptApiKeyValid = false;
     if (!lingqEnabledInput.checked) {
@@ -369,17 +384,60 @@ chatgptEnabledInput.addEventListener('change', () => {
   }
 });
 
+function getSettingsScrollBody() {
+  return document.querySelector('.settings-form__body');
+}
+
+function keepPanelChromeVisible(settingsScrollTop) {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  const panel = document.querySelector('.panel');
+  if (panel) {
+    panel.scrollTop = 0;
+  }
+  const content = document.querySelector('.panel__content');
+  if (content) {
+    content.scrollTop = 0;
+  }
+  const settingsBody = getSettingsScrollBody();
+  if (settingsBody && Number.isFinite(settingsScrollTop)) {
+    settingsBody.scrollTop = settingsScrollTop;
+  }
+}
+
+function afterSettingsLayout(settingsScrollTop) {
+  keepPanelChromeVisible(settingsScrollTop);
+  requestAnimationFrame(() => {
+    keepPanelChromeVisible(settingsScrollTop);
+    requestAnimationFrame(() => keepPanelChromeVisible(settingsScrollTop));
+  });
+}
+
 supabaseEnabledInput.addEventListener('change', () => {
+  const settingsBody = getSettingsScrollBody();
+  const settingsScrollTop = settingsBody ? settingsBody.scrollTop : 0;
   const supabaseEnabled = supabaseEnabledInput.checked;
   applyOptionalFeatureUi();
+  afterSettingsLayout(settingsScrollTop);
   if (!supabaseEnabled && !lingqEnabledInput.checked) {
     lingqEnabledInput.checked = true;
     chrome.storage.sync.set({ lingqEnabled: true });
   }
   chrome.storage.sync.set({ supabaseEnabled }, () => {
-    wordsLoaded = false;
+    resetWordsCache();
     latencyLoaded = false;
-    refreshSupabaseGate({ force: true }).finally(() => updateLingqAvailability());
+    refreshSupabaseGate({ force: true }).finally(() => {
+      updateLingqAvailability();
+      afterSettingsLayout(settingsScrollTop);
+      // Focus scrollIntoView umí odscrollovat shell — vrať focus bez scrollu.
+      try {
+        supabaseEnabledInput.focus({ preventScroll: true });
+      } catch {
+        supabaseEnabledInput.focus();
+      }
+      afterSettingsLayout(settingsScrollTop);
+    });
   });
 });
 
@@ -786,16 +844,111 @@ installSupabaseDbButton.addEventListener('click', () => {
 });
 
 wordSearchInput.addEventListener('input', () => {
-  renderWords();
+  if (wordSearchTimer) {
+    clearTimeout(wordSearchTimer);
+  }
+  wordSearchTimer = setTimeout(() => {
+    wordSearchTimer = null;
+    const query = wordSearchInput.value.trim();
+    if (query) {
+      loadWordsFilter({ mode: 'search', query });
+    } else if (wordLetterFilter) {
+      loadWordsFilter({ mode: wordLetterFilter === 'TOP' ? 'top' : 'letter', letter: wordLetterFilter });
+    } else {
+      wordsBucket = [];
+      renderWordLetters();
+      renderWords();
+    }
+  }, 300);
 });
 
 wordStatusFilterInput.addEventListener('change', () => {
-  renderWords();
+  const query = wordSearchInput.value.trim();
+  if (query) {
+    loadWordsFilter({ mode: 'search', query, force: true });
+  } else if (wordLetterFilter) {
+    loadWordsFilter({
+      mode: wordLetterFilter === 'TOP' ? 'top' : 'letter',
+      letter: wordLetterFilter,
+      force: true,
+    });
+  } else {
+    renderWords();
+  }
 });
 
 wordSortInput.addEventListener('change', () => {
   renderWords();
 });
+
+if (wordsLetters) {
+  wordsLetters.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-letter]');
+    if (!button || button.disabled) {
+      return;
+    }
+    const next = button.getAttribute('data-letter');
+    if (!next) {
+      return;
+    }
+    wordLetterFilter = next;
+    wordSearchInput.value = '';
+    renderWordLetters();
+    loadWordsFilter({
+      mode: next === 'TOP' ? 'top' : 'letter',
+      letter: next,
+    });
+  });
+}
+
+const imageLightbox = document.getElementById('image-lightbox');
+const imageLightboxImg = document.getElementById('image-lightbox-img');
+const imageLightboxTitle = document.getElementById('image-lightbox-title');
+const imageLightboxClose = document.getElementById('image-lightbox-close');
+const imageLightboxX = document.getElementById('image-lightbox-x');
+let imageLightboxOpener = null;
+
+function closeImageLightbox() {
+  if (!imageLightbox || imageLightbox.hidden) {
+    return;
+  }
+  imageLightbox.hidden = true;
+  document.removeEventListener('keydown', onImageLightboxKeydown);
+  imageLightboxOpener?.focus();
+  imageLightboxOpener = null;
+}
+
+function openImageLightbox(opener) {
+  if (!imageLightbox || !imageLightboxImg || !opener) {
+    return;
+  }
+  const thumb = opener.querySelector('img');
+  const caption = opener.closest('figure')?.querySelector('figcaption')?.textContent?.trim()
+    || thumb?.alt
+    || t('preview.close');
+  imageLightboxImg.src = thumb?.currentSrc || thumb?.src || '';
+  imageLightboxImg.alt = thumb?.alt || caption;
+  if (imageLightboxTitle) {
+    imageLightboxTitle.textContent = caption;
+  }
+  imageLightboxOpener = opener;
+  imageLightbox.hidden = false;
+  document.addEventListener('keydown', onImageLightboxKeydown);
+  (imageLightboxX || imageLightboxClose)?.focus();
+}
+
+function onImageLightboxKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeImageLightbox();
+  }
+}
+
+document.querySelectorAll('.db-gate__preview-open').forEach((button) => {
+  button.addEventListener('click', () => openImageLightbox(button));
+});
+imageLightboxClose?.addEventListener('click', closeImageLightbox);
+imageLightboxX?.addEventListener('click', closeImageLightbox);
 
 function activateTab(tabName) {
   tabButtons.forEach((button) => {
@@ -825,6 +978,7 @@ function activateTab(tabName) {
 }
 
 function applyDbGateUi() {
+  const settingsScrollTop = getSettingsScrollBody()?.scrollTop;
   [panelWords, panelImport, panelStats, panelLatency].forEach((panel) => {
     if (!panel) {
       return;
@@ -834,11 +988,19 @@ function applyDbGateUi() {
       gate.hidden = supabaseReady;
     });
   });
+  if (dbModeAlert) {
+    // Bez připravené / zapnuté DB doplněk běží jen přes LingQ API.
+    dbModeAlert.hidden = supabaseReady;
+  }
   if (syncKnownWordsButton) {
     syncKnownWordsButton.disabled = !supabaseReady;
   }
   if (resetLingqImportButton) {
     resetLingqImportButton.disabled = !supabaseReady;
+  }
+  // Zobrazení/skrytí banneru mění výšku chrome — nenech focus odscrollovat menu.
+  if (panelSettings && !panelSettings.hidden) {
+    afterSettingsLayout(settingsScrollTop);
   }
 }
 
@@ -920,8 +1082,14 @@ function applySchemaUpdateAlert(response = {}) {
 
 schemaAlertOpenSettings?.addEventListener('click', () => {
   activateTab('settings');
+  const settingsBody = getSettingsScrollBody();
   const supabaseSection = document.getElementById('settings-supabase-title');
-  supabaseSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (settingsBody && supabaseSection) {
+    const bodyRect = settingsBody.getBoundingClientRect();
+    const sectionRect = supabaseSection.getBoundingClientRect();
+    settingsBody.scrollTop += sectionRect.top - bodyRect.top - 8;
+  }
+  afterSettingsLayout(settingsBody?.scrollTop);
 });
 
 function normalizeIdleRange(settings = {}) {
@@ -1241,7 +1409,7 @@ async function runSupabaseDbCheck() {
       applyDbGateUi();
       updateLingqAvailability();
       if (supabaseReady) {
-        wordsLoaded = false;
+        resetWordsCache();
         latencyLoaded = false;
       }
     });
@@ -1278,7 +1446,7 @@ async function runSupabaseDbInstall() {
         applySchemaUpdateAlert({});
         applyDbGateUi();
         updateLingqAvailability();
-        wordsLoaded = false;
+        resetWordsCache();
         latencyLoaded = false;
         return;
       }
@@ -1521,108 +1689,272 @@ function startKnownWordsSync() {
       return;
     }
     renderKnownWordsSyncProgress(response);
-    wordsLoaded = false;
+    resetWordsCache();
     loadWords(true);
+  });
+}
+
+function resetWordsCache() {
+  wordsCache = new Map();
+  wordsLetterCounts = Object.create(null);
+  wordsEmptyLetters = new Set();
+  wordsBucket = [];
+  wordsTotalInDb = null;
+  wordsIndexReady = false;
+  wordsLoaded = false;
+}
+
+function wordsCacheKey(mode, letter, query, status) {
+  return `${mode}|${letter || ''}|${String(query || '').toLowerCase()}|${status || 'all'}`;
+}
+
+function renderWordLetters() {
+  if (!wordsLetters) {
+    return;
+  }
+  const searching = Boolean(wordSearchInput.value.trim());
+  const dbEmpty = wordsIndexReady && wordsTotalInDb === 0;
+  wordsLetters.innerHTML = '';
+
+  const topButton = document.createElement('button');
+  topButton.type = 'button';
+  topButton.className = 'words-letter words-letter--top';
+  topButton.dataset.letter = 'TOP';
+  topButton.textContent = t('words.letterTop');
+  topButton.title = t('words.letterTopTitle', { n: WORDS_TOP_RENDER_CAP });
+  topButton.disabled = dbEmpty;
+  topButton.setAttribute('aria-pressed', !searching && wordLetterFilter === 'TOP' ? 'true' : 'false');
+  if (!searching && wordLetterFilter === 'TOP') {
+    topButton.classList.add('words-letter--active');
+  }
+  wordsLetters.appendChild(topButton);
+
+  WORD_LETTER_KEYS.forEach((letter) => {
+    const knownCount = wordsLetterCounts[letter];
+    const isEmpty = wordsEmptyLetters.has(letter) || knownCount === 0;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'words-letter';
+    button.dataset.letter = letter;
+    button.textContent = letter;
+    button.disabled = dbEmpty || isEmpty;
+    if (typeof knownCount === 'number' && knownCount > 0) {
+      button.title = t('words.letterTitle', { letter, n: knownCount });
+    } else if (isEmpty) {
+      button.title = t('words.letterEmpty', { letter });
+    } else {
+      button.title = t('words.letterLoad', { letter });
+    }
+    button.setAttribute('aria-pressed', !searching && wordLetterFilter === letter ? 'true' : 'false');
+    if (!searching && wordLetterFilter === letter) {
+      button.classList.add('words-letter--active');
+    }
+    wordsLetters.appendChild(button);
   });
 }
 
 function loadWords(force) {
   if (!supabaseReady) {
-    wordsLoaded = false;
-    allWords = [];
+    resetWordsCache();
     wordsMeta.textContent = '';
     wordsList.innerHTML = '';
+    if (wordsLetters) {
+      wordsLetters.innerHTML = '';
+    }
     applyDbGateUi();
     return;
   }
-  if (wordsLoading) {
-    return;
+
+  if (force) {
+    const previousLetter = wordLetterFilter;
+    const previousQuery = wordSearchInput.value.trim();
+    resetWordsCache();
+    wordLetterFilter = previousLetter;
+    renderWordLetters();
+    if (previousQuery) {
+      loadWordsFilter({ mode: 'search', query: previousQuery, force: true });
+      return;
+    }
+    if (previousLetter) {
+      loadWordsFilter({
+        mode: previousLetter === 'TOP' ? 'top' : 'letter',
+        letter: previousLetter,
+        force: true,
+      });
+      return;
+    }
   }
-  if (wordsLoaded && !force) {
+
+  if (wordsIndexReady && !force) {
+    renderWordLetters();
     renderWords();
     return;
   }
 
-  wordsLoading = true;
-  wordsMeta.textContent = t('words.loading');
+  wordsMeta.textContent = t('words.loadingIndex');
   wordsList.innerHTML = '';
-
-  chrome.runtime.sendMessage({ type: 'LIST_SUPABASE_WORDS' }, (response) => {
-    wordsLoading = false;
+  chrome.runtime.sendMessage({ type: 'COUNT_SUPABASE_WORDS' }, (response) => {
     if (chrome.runtime.lastError || !response?.ok) {
-      wordsLoaded = false;
-      allWords = [];
+      wordsIndexReady = false;
       wordsMeta.textContent = '';
       wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('words.loadFailed')}</div>`;
       return;
     }
-
+    wordsTotalInDb = Number(response.total) || 0;
+    wordsIndexReady = true;
     wordsLoaded = true;
-    allWords = Array.isArray(response.words) ? response.words : [];
+    renderWordLetters();
     renderWords();
   });
 }
 
-function renderWords() {
-  const query = wordSearchInput.value.trim().toLowerCase();
+function loadWordsFilter({ mode, letter = null, query = '', force = false } = {}) {
+  if (!supabaseReady) {
+    applyDbGateUi();
+    return;
+  }
+
   const statusFilter = wordStatusFilterInput.value;
-  const sort = wordSortInput.value;
-  let items = allWords.filter((item) => String(item.translation || '').trim());
-  const totalWithTranslation = items.length;
-
-  if (statusFilter !== 'all') {
-    const wanted = Number(statusFilter);
-    items = items.filter((item) => Number(item.status) === wanted);
+  const cacheKey = wordsCacheKey(mode, letter, query, statusFilter);
+  if (!force && wordsCache.has(cacheKey)) {
+    wordsBucket = wordsCache.get(cacheKey).slice();
+    if (mode === 'letter' && letter) {
+      wordsLetterCounts[letter] = wordsBucket.length;
+      if (wordsBucket.length === 0) {
+        wordsEmptyLetters.add(letter);
+      } else {
+        wordsEmptyLetters.delete(letter);
+      }
+    }
+    renderWordLetters();
+    renderWords();
+    return;
   }
 
-  if (query) {
-    items = items.filter((item) => {
-      const word = String(item.word || '').toLowerCase();
-      const translation = String(item.translation || '').toLowerCase();
-      return word.includes(query) || translation.includes(query);
+  const token = ++wordsLoadToken;
+  wordsLoading = true;
+  wordsMeta.textContent = mode === 'search'
+    ? t('words.loadingSearch')
+    : mode === 'top'
+      ? t('words.loadingTop')
+      : t('words.loadingLetter', { letter: letter || '?' });
+  wordsList.innerHTML = '';
+
+  chrome.runtime.sendMessage({
+    type: 'LIST_SUPABASE_WORDS_FILTER',
+    mode,
+    letter,
+    query,
+    status: statusFilter === 'all' ? null : statusFilter,
+    limit: mode === 'top' ? WORDS_TOP_RENDER_CAP : mode === 'search' ? WORDS_SEARCH_LIMIT : undefined,
+  }, (response) => {
+    if (token !== wordsLoadToken) {
+      return;
+    }
+    wordsLoading = false;
+    if (chrome.runtime.lastError || !response?.ok) {
+      wordsBucket = [];
+      wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('words.loadFailed')}</div>`;
+      wordsMeta.textContent = '';
+      return;
+    }
+
+    wordsBucket = Array.isArray(response.words) ? response.words : [];
+    wordsCache.set(cacheKey, wordsBucket.slice());
+    if (mode === 'letter' && letter) {
+      const count = response.total != null ? Number(response.total) : wordsBucket.length;
+      wordsLetterCounts[letter] = count;
+      if (count === 0) {
+        wordsEmptyLetters.add(letter);
+      } else {
+        wordsEmptyLetters.delete(letter);
+      }
+    }
+    if (response.total != null && mode !== 'search' && mode !== 'top' && wordsTotalInDb == null) {
+      wordsTotalInDb = Number(response.total);
+    }
+    renderWordLetters();
+    renderWords({
+      matchTotal: response.total != null ? Number(response.total) : wordsBucket.length,
     });
-  }
+  });
+}
 
+function renderWords(options = {}) {
+  const query = wordSearchInput.value.trim();
+  const sort = wordSortInput.value;
+  const totalInDb = wordsTotalInDb;
+  let items = wordsBucket.slice();
+  const matchTotal = Number.isFinite(options.matchTotal) ? options.matchTotal : items.length;
+
+  const effectiveSort = (!query && wordLetterFilter === 'TOP') ? 'views-desc' : sort;
   items.sort((left, right) => {
     const leftWord = String(left.word || '');
     const rightWord = String(right.word || '');
     const leftViews = Number(left.view_count) || 0;
     const rightViews = Number(right.view_count) || 0;
-    if (sort === 'alpha-desc') {
+    if (effectiveSort === 'alpha-desc') {
       return rightWord.localeCompare(leftWord, 'cs', { sensitivity: 'base' });
     }
-    if (sort === 'views-desc') {
+    if (effectiveSort === 'views-desc') {
       return rightViews - leftViews || leftWord.localeCompare(rightWord, 'cs', { sensitivity: 'base' });
     }
-    if (sort === 'views-asc') {
+    if (effectiveSort === 'views-asc') {
       return leftViews - rightViews || leftWord.localeCompare(rightWord, 'cs', { sensitivity: 'base' });
     }
     return leftWord.localeCompare(rightWord, 'cs', { sensitivity: 'base' });
   });
 
-  if (allWords.length === 0) {
+  renderWordLetters();
+
+  if (wordsIndexReady && totalInDb === 0) {
     wordsMeta.textContent = t('words.emptyDb');
     wordsList.innerHTML = `<div class="words-empty">${t('words.emptyHint')}</div>`;
     return;
   }
 
-  if (totalWithTranslation === 0) {
-    wordsMeta.textContent = t('words.noTranslation');
-    wordsList.innerHTML = `<div class="words-empty">${t('words.noTranslationHint')}</div>`;
+  if (query) {
+    wordsMeta.textContent = matchTotal > items.length
+      ? t('words.searchCapped', {
+        n: items.length,
+        total: matchTotal,
+        all: totalInDb != null ? totalInDb : '…',
+      })
+      : t('words.searchShown', {
+        n: items.length,
+        all: totalInDb != null ? totalInDb : '…',
+      });
+  } else if (!wordLetterFilter) {
+    wordsMeta.textContent = totalInDb != null
+      ? t('words.pickLetter', { total: totalInDb })
+      : t('words.pickLetterUnknown');
+    wordsList.innerHTML = `<div class="words-empty">${t('words.pickLetterHint')}</div>`;
     return;
+  } else if (wordLetterFilter === 'TOP') {
+    wordsMeta.textContent = t('words.topCount', {
+      n: items.length,
+      total: totalInDb != null ? totalInDb : '…',
+    });
+  } else {
+    wordsMeta.textContent = t('words.letterCount', {
+      letter: wordLetterFilter,
+      n: items.length,
+      total: totalInDb != null ? totalInDb : '…',
+    });
   }
 
-  const filtered = query || statusFilter !== 'all';
-  wordsMeta.textContent = filtered
-    ? t('words.shown', { n: items.length, total: totalWithTranslation })
-    : t('words.count', { n: totalWithTranslation });
-
   if (items.length === 0) {
-    wordsList.innerHTML = `<div class="words-empty">${t('words.noFilter')}</div>`;
+    const emptyText = query
+      ? t('words.noFilter')
+      : wordLetterFilter === 'TOP'
+        ? t('words.noFilter')
+        : t('words.letterNoWords', { letter: wordLetterFilter });
+    wordsList.innerHTML = `<div class="words-empty">${emptyText}</div>`;
     return;
   }
 
   wordsList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   items.forEach((item) => {
     const row = document.createElement('div');
     row.className = 'word-row';
@@ -1641,10 +1973,9 @@ function renderWords() {
     translation.textContent = translationText || t('words.noTranslationLabel');
     if (!translationText) {
       translation.classList.add('word-row__translation--empty');
-    } else {
-      enableWordTranslationEditing(translation, item, row);
-      translation.title = t('words.editTranslation');
     }
+    enableWordTranslationEditing(translation, item, row);
+    translation.title = t('words.editTranslation');
 
     main.append(term, translation);
 
@@ -1674,8 +2005,9 @@ function renderWords() {
 
     actions.append(views, status, remove);
     row.append(main, actions);
-    wordsList.appendChild(row);
+    fragment.appendChild(row);
   });
+  wordsList.appendChild(fragment);
 }
 
 function enableWordTranslationEditing(element, item, row) {
@@ -1711,7 +2043,8 @@ function enableWordTranslationEditing(element, item, row) {
       if (!save || !next || next === current) {
         row.classList.remove('word-row--editing');
         input.replaceWith(element);
-        element.textContent = current;
+        element.textContent = current || t('words.noTranslationLabel');
+        element.classList.toggle('word-row__translation--empty', !current);
         return;
       }
       saveWordTranslation(item, row, element, input, current, next);
@@ -1755,7 +2088,8 @@ function saveWordTranslation(item, row, element, input, previous, next) {
     if (chrome.runtime.lastError || !response?.ok) {
       input.disabled = false;
       input.replaceWith(element);
-      element.textContent = previous;
+      element.textContent = previous || t('words.noTranslationLabel');
+      element.classList.toggle('word-row__translation--empty', !previous);
       window.alert(response?.error || chrome.runtime.lastError?.message || t('words.saveTranslationFailed'));
       return;
     }
@@ -1766,7 +2100,7 @@ function saveWordTranslation(item, row, element, input, previous, next) {
       item.lingq_card_id = response.cardId;
     }
     const needle = String(item.word || '').toLowerCase();
-    allWords = allWords.map((entry) => {
+    const patch = (entry) => {
       if (String(entry.word || '').toLowerCase() !== needle) {
         return entry;
       }
@@ -1775,6 +2109,10 @@ function saveWordTranslation(item, row, element, input, previous, next) {
         translation: stored,
         lingq_card_id: item.lingq_card_id,
       };
+    };
+    wordsBucket = wordsBucket.map(patch);
+    wordsCache.forEach((list, key) => {
+      wordsCache.set(key, list.map(patch));
     });
 
     element.textContent = stored;
@@ -1815,7 +2153,21 @@ function deleteWord(item, row, button) {
     }
 
     const needle = word.toLowerCase();
-    allWords = allWords.filter((entry) => String(entry.word || '').toLowerCase() !== needle);
+    const keep = (entry) => String(entry.word || '').toLowerCase() !== needle;
+    wordsBucket = wordsBucket.filter(keep);
+    wordsCache.forEach((list, key) => {
+      wordsCache.set(key, list.filter(keep));
+    });
+    if (wordLetterFilter && wordLetterFilter !== 'TOP' && typeof wordsLetterCounts[wordLetterFilter] === 'number') {
+      wordsLetterCounts[wordLetterFilter] = Math.max(0, wordsLetterCounts[wordLetterFilter] - 1);
+      if (wordsLetterCounts[wordLetterFilter] === 0) {
+        wordsEmptyLetters.add(wordLetterFilter);
+      }
+    }
+    if (typeof wordsTotalInDb === 'number' && wordsTotalInDb > 0) {
+      wordsTotalInDb -= 1;
+    }
+    renderWordLetters();
     renderWords();
   });
 }
