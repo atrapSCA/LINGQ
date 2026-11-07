@@ -492,3 +492,41 @@
 #lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--error .lingq-tooltip__translation {
   color: #a33b3b;
 }
+
+/* Podbarvení: neznámé = modrá; 1 silná žlutá → 4 slabá; K bez barvy. Neuvnitř odkazů. */
+span.lingq-hl {
+  border-radius: 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0.02em 0.06em;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  cursor: inherit;
+}
+
+span.lingq-hl--new {
+  background-color: rgba(64, 148, 255, 0.42) !important;
+}
+
+span.lingq-hl--1 {
+  background-color: rgba(255, 196, 0, 0.72) !important;
+}
+
+span.lingq-hl--2 {
+  background-color: rgba(255, 214, 40, 0.5) !important;
+}
+
+span.lingq-hl--3 {
+  background-color: rgba(255, 228, 90, 0.32) !important;
+}
+
+span.lingq-hl--4 {
+  background-color: rgba(255, 240, 150, 0.16) !important;
+}
+
+a span.lingq-hl,
+a[href] span.lingq-hl,
+[role="link"] span.lingq-hl {
+  background-color: transparent !important;
+  padding: 0;
+}

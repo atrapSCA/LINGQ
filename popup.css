@@ -67,9 +67,19 @@ h1 {
   background: var(--bg-elevated);
 }
 
+.highlight-card,
 .theme-card,
 .lang-card {
   margin-top: 10px;
+}
+
+.highlight-card.is-disabled {
+  opacity: 0.62;
+}
+
+.highlight-card.is-disabled .switch {
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .status-dot {
@@ -79,6 +89,11 @@ h1 {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.status-dot--highlight {
+  background: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.22);
 }
 
 .status-dot.is-off {
@@ -102,6 +117,7 @@ h1 {
 }
 
 .status-card #status-description,
+.status-card #highlight-description,
 .theme-card #theme-description,
 .lang-card span {
   margin-top: 2px;

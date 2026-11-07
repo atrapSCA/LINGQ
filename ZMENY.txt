@@ -277,6 +277,13 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.6
+7. 11. 2026 13:40
+- Stabilní user release: podbarvení slovíček na stránce podle Supabase DB.
+- Neznámá (mimo DB) = modrá; znalost 1–4 = žlutá (1 nejsilnější); K a slovíčka bez překladu = bez barvy.
+- Bez podbarvení v odkazech; přepínač v mini popupu i Nastavení; bez DB je možnost neaktivní.
+- Spolehlivější párování slov (normalizace klíčů); K se načítá přednostně; jen data z DB, ne LingQ API.
+
 Verze 0.3.5
 7. 11. 2026 12:25
 - Stabilní user release: bezpečnostní zpevnění bez změny běžné funkčnosti.

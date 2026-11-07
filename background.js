@@ -39,6 +39,7 @@ const DEFAULTS = {
   supabaseEnabled: true,
   supabaseUrl: '',
   supabaseKey: '',
+  highlightEnabled: true,
 };
 
 const CHATGPT_MODELS = {
@@ -65,6 +66,7 @@ const CONTENT_ONLY_MESSAGES = new Set([
   'UPDATE_STATUS',
   'UPDATE_TRANSLATION',
   'GET_ALTERNATIVES',
+  'GET_HIGHLIGHT_MAP',
 ]);
 const EXTENSION_ONLY_MESSAGES = new Set([
   'OPEN_APP',
@@ -100,11 +102,24 @@ const MESSAGE_RATE_LIMITS = {
   GET_ALTERNATIVES: { windowMs: 60_000, max: 30 },
   UPDATE_STATUS: { windowMs: 60_000, max: 60 },
   UPDATE_TRANSLATION: { windowMs: 60_000, max: 60 },
+  GET_HIGHLIGHT_MAP: { windowMs: 60_000, max: 12 },
 };
 const rateLimitBuckets = new Map();
 let activeUserLookups = 0;
 let appTabId = null;
 let knownWordsFetchPromise = null;
+let highlightMapCache = {
+  language: '',
+  at: 0,
+  words: null,
+};
+const HIGHLIGHT_MAP_TTL_MS = 5 * 60 * 1000;
+const HIGHLIGHT_MAP_PAGE_SIZE = 1000;
+const HIGHLIGHT_MAP_MAX_PAGES = 250;
+
+function invalidateHighlightMapCache() {
+  highlightMapCache = { language: '', at: 0, words: null };
+}
 
 function isExtensionPageSender(sender) {
   const url = String(sender?.url || sender?.tab?.url || '');
@@ -211,7 +226,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.supabaseUrl || changes.supabaseKey || changes.supabaseEnabled) {
     invalidateSupabaseReadyCache();
+    invalidateHighlightMapCache();
     ensureLatencyWatch({ reshuffle: true });
+  }
+  if (changes.language || changes.highlightEnabled) {
+    invalidateHighlightMapCache();
   }
   if (changes.lingqEnabled) {
     ensureLatencyWatch({ reshuffle: true });
@@ -370,6 +389,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       getAlternativeTranslations(message.word, message.currentTranslation)
         .then((translations) => reply(sendResponse, { ok: true, translations }))
         .catch((error) => reply(sendResponse, { ok: false, error: getErrorMessage(error) }));
+    });
+    return true;
+  }
+
+  if (type === 'GET_HIGHLIGHT_MAP') {
+    gateUserAction(type, sender, sendResponse, () => {
+      getHighlightWordMap({ force: Boolean(message.force) })
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({
+          ok: false,
+          words: {},
+          error: error instanceof Error ? error.message : bt('err.highlightMap'),
+        }));
     });
     return true;
   }
@@ -1230,6 +1262,7 @@ async function ensureCardId(cardId, word, translation, settings) {
 
 async function updateStatus(cardId, status, word, translation = '') {
   const settings = await chrome.storage.sync.get(DEFAULTS);
+  invalidateHighlightMapCache();
   const { apiStatus, body } = toApiStatus(status);
   if (!isLingqEnabled(settings)) {
     if (!canUseOfflineMode(settings)) {
@@ -2482,6 +2515,51 @@ function normalizeWord(word) {
   return String(word || '').replace(/["'""‚''.!,?;:()[\]{}<>]/g, '').trim();
 }
 
+/** Jednotný klíč pro podbarvení — musí sedět s content.js. */
+function highlightLookupKey(word) {
+  return String(word || '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[\u00AD\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/["'`''""‚„«.!,?;:()[\]{}<>]/g, '')
+    .replace(/^[\s\u00A0]+|[\s\u00A0]+$/g, '');
+}
+
+function highlightKeyVariants(word) {
+  const raw = String(word || '');
+  const lower = raw.normalize('NFC').toLowerCase().replace(/^[\s\u00A0]+|[\s\u00A0]+$/g, '');
+  const noSoft = lower.replace(/[\u00AD\u200B-\u200D\uFEFF]/g, '');
+  const stripped = highlightLookupKey(raw);
+  const noHyphen = stripped.replace(/-/g, '');
+  return [...new Set([stripped, noSoft, lower, noHyphen].filter(Boolean))];
+}
+
+function highlightMergePriority(status) {
+  const value = Number(status);
+  if (value === 5) {
+    return 300; // K — nejvyšší priorita, nikdy nepřepsat učením
+  }
+  if (value === 6) {
+    return 200; // v DB bez překladu
+  }
+  if (value >= 1 && value <= 4) {
+    return value;
+  }
+  return 0;
+}
+
+function assignHighlightStatus(words, rawWord, mappedStatus) {
+  const nextPriority = highlightMergePriority(mappedStatus);
+  for (const key of highlightKeyVariants(rawWord)) {
+    const previous = words[key];
+    if (previous == null || nextPriority > highlightMergePriority(previous)) {
+      words[key] = mappedStatus;
+    }
+  }
+}
+
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : bt('err.lingqConnect');
 }
@@ -2495,6 +2573,7 @@ async function attachSupabaseViewCount(result, settings) {
     if (!gate.ready) {
       return null;
     }
+    invalidateHighlightMapCache();
     const row = await syncSupabaseWord('touch_word', {
       word: result.word,
       translation: result.translation,
@@ -2977,6 +3056,112 @@ async function getSupabaseWordsClient() {
   };
 }
 
+/** V mapě podbarvení: 6 = v DB bez překladu → nepodbarvovat (stejně jako K). */
+const HIGHLIGHT_SKIP_NO_TRANSLATION = 6;
+
+/**
+ * Mapa slovíček pro podbarvení stránky — jen Supabase.
+ * 1–4 = žlutá, 5 = K bez barvy, 6 = v DB bez překladu bez barvy, chybějící klíč = neznámé (modrá).
+ */
+async function getHighlightWordMap({ force = false } = {}) {
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const language = settings.language || 'en';
+  if (settings.highlightEnabled === false) {
+    return { words: {}, language, enabled: false, ready: false };
+  }
+  if (!isSupabaseConfigured(settings)) {
+    return { words: {}, language, enabled: true, ready: false };
+  }
+
+  const gate = await getSupabaseGate({ force: false });
+  if (!gate.ready) {
+    return { words: {}, language, enabled: true, ready: false };
+  }
+
+  const now = Date.now();
+  if (
+    !force
+    && highlightMapCache.words
+    && highlightMapCache.language === language
+    && now - highlightMapCache.at < HIGHLIGHT_MAP_TTL_MS
+  ) {
+    return {
+      words: highlightMapCache.words,
+      language,
+      enabled: true,
+      ready: true,
+      cached: true,
+    };
+  }
+
+  const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(settings.supabaseKey || '').trim();
+  const words = Object.create(null);
+
+  async function fetchHighlightPages(statusFilter) {
+    let offset = 0;
+    for (let page = 0; page < HIGHLIGHT_MAP_MAX_PAGES; page += 1) {
+      const params = new URLSearchParams({
+        select: 'word,status,translation',
+        language: `eq.${language}`,
+        status: statusFilter,
+        order: 'id.asc',
+        limit: String(HIGHLIGHT_MAP_PAGE_SIZE),
+        offset: String(offset),
+      });
+      const response = await fetch(`${baseUrl}/rest/v1/words?${params}`, {
+        method: 'GET',
+        headers: {
+          apikey: apiKey,
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error(bt('err.supabaseHttp', { status: response.status }));
+      }
+      const rows = await response.json();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        break;
+      }
+      for (const row of rows) {
+        const status = Number(row.status);
+        if (!Number.isInteger(status) || status < 1 || status > 5) {
+          continue;
+        }
+        const hasTranslation = Boolean(String(row.translation || '').trim());
+        // K vždy jako 5 (bez barvy). Jinak bez překladu = 6 (bez barvy), 1–4 = žlutá.
+        let mapped;
+        if (status === 5) {
+          mapped = 5;
+        } else if (!hasTranslation) {
+          mapped = HIGHLIGHT_SKIP_NO_TRANSLATION;
+        } else {
+          mapped = status;
+        }
+        assignHighlightStatus(words, row.word, mapped);
+      }
+      if (rows.length < HIGHLIGHT_MAP_PAGE_SIZE) {
+        break;
+      }
+      offset += HIGHLIGHT_MAP_PAGE_SIZE;
+    }
+  }
+
+  // Nejdřív všechna K, ať se neutnou limitem za učícími slovíčky.
+  await fetchHighlightPages('eq.5');
+  await fetchHighlightPages('in.(1,2,3,4)');
+
+  highlightMapCache = { language, at: now, words };
+  return {
+    words,
+    language,
+    enabled: true,
+    ready: true,
+    cached: false,
+    count: Object.keys(words).length,
+  };
+}
+
 async function countSupabaseWords() {
   const { baseUrl, apiKey, language } = await getSupabaseWordsClient();
   const params = new URLSearchParams({
@@ -3176,6 +3361,7 @@ async function listSupabaseWords() {
 
 async function deleteWordEverywhere(word, cardId = null) {
   const settings = await chrome.storage.sync.get(DEFAULTS);
+  invalidateHighlightMapCache();
   const original = String(word || '').trim();
   const text = normalizeWord(original);
   if (!text) {

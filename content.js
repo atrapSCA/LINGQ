@@ -2,7 +2,15 @@ const TOOLTIP_ID = 'lingq-click-translator-tooltip';
 const WORD_PATTERN = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/u;
 const STATUS_LEVELS = [['1', 1], ['2', 2], ['3', 3], ['4', 4], ['K', 5]];
 const USER_PHRASE_WORD_LIMIT = 10;
+const HIGHLIGHT_CLASS = 'lingq-hl';
+const HIGHLIGHT_SKIP_TAGS = new Set([
+  'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION',
+  'CODE', 'PRE', 'SVG', 'MATH', 'IFRAME', 'OBJECT', 'VIDEO', 'AUDIO', 'CANVAS',
+  'HEAD', 'TITLE', 'META', 'LINK', 'BR', 'HR', 'IMG', 'PICTURE', 'SOURCE',
+  'A',
+]);
 let enabled = true;
+let highlightEnabled = true;
 let clickCount = 2;
 let sourceLanguage = 'en';
 let targetLanguage = 'cs';
@@ -11,6 +19,11 @@ let phraseTranslationSource = 'lingq';
 let activeRequest = 0;
 let phraseSelectionActive = false;
 let tooltip;
+let highlightMap = Object.create(null);
+let highlightRunId = 0;
+let highlightMutationTimer = 0;
+let highlightObserver = null;
+let highlightApplying = false;
 
 let i18nReady = Promise.resolve();
 
@@ -47,6 +60,7 @@ function normalizePhraseSource(value) {
 
 chrome.storage.sync.get({
   enabled: true,
+  highlightEnabled: true,
   clickCount: 2,
   language: 'en',
   targetLanguage: 'cs',
@@ -54,7 +68,8 @@ chrome.storage.sync.get({
   phraseTranslationSource: 'lingq',
   lingqEnabled: true,
 }, (settings) => {
-  enabled = settings.enabled;
+  enabled = settings.enabled !== false;
+  highlightEnabled = settings.highlightEnabled !== false;
   clickCount = Number(settings.clickCount) === 2 ? 2 : 1;
   sourceLanguage = settings.language || 'en';
   targetLanguage = settings.targetLanguage || 'cs';
@@ -63,6 +78,7 @@ chrome.storage.sync.get({
     ? 'chatgpt'
     : normalizePhraseSource(settings.phraseTranslationSource);
   applyTooltipTheme();
+  schedulePageHighlight();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -70,13 +86,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
   if (changes.enabled) {
-    enabled = changes.enabled.newValue;
+    enabled = changes.enabled.newValue !== false;
+    schedulePageHighlight({ force: true });
+  }
+  if (changes.highlightEnabled) {
+    highlightEnabled = changes.highlightEnabled.newValue !== false;
+    schedulePageHighlight({ force: true });
   }
   if (changes.clickCount) {
     clickCount = Number(changes.clickCount.newValue) === 2 ? 2 : 1;
   }
   if (changes.language) {
     sourceLanguage = changes.language.newValue || 'en';
+    schedulePageHighlight({ force: true });
   }
   if (changes.targetLanguage) {
     targetLanguage = changes.targetLanguage.newValue || 'cs';
@@ -84,6 +106,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.theme) {
     uiTheme = normalizeUiTheme(changes.theme.newValue);
     applyTooltipTheme();
+  }
+  if (changes.supabaseEnabled || changes.supabaseUrl || changes.supabaseKey) {
+    schedulePageHighlight({ force: true });
   }
   if (changes.phraseTranslationSource || changes.lingqEnabled) {
     chrome.storage.sync.get({
@@ -234,6 +259,9 @@ async function lookupFromPoint(clientX, clientY, target, event) {
       response.viewCount || null,
       response.alternativesSource || 'lingq',
     );
+    if (Number.isFinite(Number(response.status)) && Number(response.status) > 0) {
+      updateHighlightForWord(selection.word, Number(response.status));
+    }
   });
 }
 
@@ -838,6 +866,7 @@ function changeStatus(status) {
       button.disabled = false;
     });
     showTooltipMessage(t('bubble.levelSaved'));
+    updateHighlightForWord(word, Number(response.status));
   });
 }
 
@@ -852,4 +881,341 @@ function hideTooltip() {
   if (tooltip) {
     tooltip.style.display = 'none';
   }
+}
+
+function schedulePageHighlight({ force = false } = {}) {
+  window.clearTimeout(schedulePageHighlight.timer);
+  schedulePageHighlight.timer = window.setTimeout(() => {
+    refreshPageHighlight({ force }).catch(() => {});
+  }, force ? 50 : 250);
+}
+
+async function refreshPageHighlight({ force = false } = {}) {
+  if (!enabled || !highlightEnabled) {
+    clearPageHighlights();
+    stopHighlightObserver();
+    highlightMap = Object.create(null);
+    return;
+  }
+
+  const runId = ++highlightRunId;
+  // První načtení vždy z DB (ne ze staré cache po updatu doplňku).
+  const requestForce = Boolean(force) || !schedulePageHighlight.loadedOnce;
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_HIGHLIGHT_MAP', force: requestForce }, (result) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(result);
+    });
+  });
+
+  if (runId !== highlightRunId) {
+    return;
+  }
+
+  if (!response?.ok || response.enabled === false || response.ready === false) {
+    clearPageHighlights();
+    stopHighlightObserver();
+    highlightMap = Object.create(null);
+    return;
+  }
+
+  highlightMap = response.words && typeof response.words === 'object'
+    ? response.words
+    : Object.create(null);
+  schedulePageHighlight.loadedOnce = true;
+
+  clearPageHighlights();
+  await applyHighlightsToRoot(document.body, runId);
+  if (runId === highlightRunId) {
+    startHighlightObserver();
+  }
+}
+
+function clearPageHighlights() {
+  highlightApplying = true;
+  try {
+    document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((span) => {
+      const parent = span.parentNode;
+      if (!parent) {
+        return;
+      }
+      parent.replaceChild(document.createTextNode(span.textContent || ''), span);
+      parent.normalize();
+    });
+  } finally {
+    highlightApplying = false;
+  }
+}
+
+/** Stejná normalizace jako background.highlightLookupKey — shoda s DB i stránkou. */
+function highlightLookupKey(word) {
+  return String(word || '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[\u00AD\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/["'`''""‚„«.!,?;:()[\]{}<>]/g, '')
+    .replace(/^[\s\u00A0]+|[\s\u00A0]+$/g, '');
+}
+
+function highlightKeyVariants(word) {
+  const raw = String(word || '');
+  const lower = raw.normalize('NFC').toLowerCase().replace(/^[\s\u00A0]+|[\s\u00A0]+$/g, '');
+  const noSoft = lower.replace(/[\u00AD\u200B-\u200D\uFEFF]/g, '');
+  const stripped = highlightLookupKey(raw);
+  const noHyphen = stripped.replace(/-/g, '');
+  return [...new Set([stripped, noSoft, lower, noHyphen].filter(Boolean))];
+}
+
+function highlightMergePriority(status) {
+  const value = Number(status);
+  if (value === 5) {
+    return 300;
+  }
+  if (value === 6) {
+    return 200;
+  }
+  if (value >= 1 && value <= 4) {
+    return value;
+  }
+  return 0;
+}
+
+function resolveHighlightEntry(rawWord) {
+  let best = null;
+  for (const key of highlightKeyVariants(rawWord)) {
+    if (!Object.prototype.hasOwnProperty.call(highlightMap, key)) {
+      continue;
+    }
+    const status = Number(highlightMap[key]);
+    if (!Number.isInteger(status)) {
+      continue;
+    }
+    if (best == null || highlightMergePriority(status) > highlightMergePriority(best.status)) {
+      best = { key, status, inDb: true };
+    }
+  }
+  return best || { key: highlightLookupKey(rawWord), status: 0, inDb: false };
+}
+
+function highlightClassForStatus(status) {
+  const level = Number(status);
+  // 5 = K, 6 = v DB bez překladu → bez barvy
+  if (level === 5 || level === 6) {
+    return null;
+  }
+  if (Number.isInteger(level) && level >= 1 && level <= 4) {
+    return `${HIGHLIGHT_CLASS} ${HIGHLIGHT_CLASS}--${level}`;
+  }
+  return `${HIGHLIGHT_CLASS} ${HIGHLIGHT_CLASS}--new`;
+}
+
+function updateHighlightForWord(word, status) {
+  const keys = highlightKeyVariants(word);
+  if (keys.length === 0) {
+    return;
+  }
+  const level = Number(status);
+  if (Number.isInteger(level) && level >= 1 && level <= 5) {
+    keys.forEach((key) => {
+      highlightMap[key] = level;
+    });
+  } else {
+    keys.forEach((key) => {
+      delete highlightMap[key];
+    });
+  }
+
+  const entry = resolveHighlightEntry(word);
+  const className = highlightClassForStatus(entry.inDb ? entry.status : 0);
+  const keySet = new Set(keys);
+
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((span) => {
+    const spanKeys = highlightKeyVariants(span.textContent);
+    if (!spanKeys.some((key) => keySet.has(key))) {
+      return;
+    }
+    if (!className) {
+      const parent = span.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(span.textContent || ''), span);
+        parent.normalize();
+      }
+      return;
+    }
+    span.className = className;
+    span.dataset.lingqHl = entry.inDb ? String(entry.status) : 'new';
+  });
+}
+
+function isHighlightSkipped(node) {
+  let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  while (el) {
+    const tag = String(el.tagName || '').toUpperCase();
+    if (el.id === TOOLTIP_ID || el.classList?.contains(HIGHLIGHT_CLASS)) {
+      return true;
+    }
+    if (HIGHLIGHT_SKIP_TAGS.has(tag)) {
+      return true;
+    }
+    // Odkazy — nikdy nepodbarvovat.
+    if (tag === 'A' || tag === 'AREA' || el.getAttribute?.('role') === 'link') {
+      return true;
+    }
+    if (el.isContentEditable || el.getAttribute?.('contenteditable') === 'true') {
+      return true;
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
+async function applyHighlightsToRoot(root, runId) {
+  if (!root) {
+    return;
+  }
+
+  const textNodes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !/\S/.test(node.nodeValue)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (isHighlightSkipped(node)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  let current = walker.nextNode();
+  while (current) {
+    textNodes.push(current);
+    current = walker.nextNode();
+  }
+
+  const chunkSize = 40;
+  for (let i = 0; i < textNodes.length; i += chunkSize) {
+    if (runId !== highlightRunId) {
+      return;
+    }
+    highlightApplying = true;
+    try {
+      textNodes.slice(i, i + chunkSize).forEach((node) => {
+        if (node.isConnected) {
+          wrapHighlightedWords(node);
+        }
+      });
+    } finally {
+      highlightApplying = false;
+    }
+    await new Promise((resolve) => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => resolve(), { timeout: 80 });
+      } else {
+        window.setTimeout(resolve, 0);
+      }
+    });
+  }
+}
+
+function wrapHighlightedWords(textNode) {
+  const text = textNode.nodeValue || '';
+  const pattern = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’\-]*/gu;
+  let match;
+  let lastIndex = 0;
+  let changed = false;
+  const fragment = document.createDocumentFragment();
+
+  while ((match = pattern.exec(text))) {
+    const raw = match[0];
+    const entry = resolveHighlightEntry(raw);
+    if (!entry.key && !entry.inDb) {
+      continue;
+    }
+    // K (5) / v DB bez překladu (6) bez barvy; 1–4 žlutá; mimo DB = neznámé (modrá).
+    if (entry.inDb && (entry.status === 5 || entry.status === 6)) {
+      continue;
+    }
+    const className = highlightClassForStatus(entry.inDb ? entry.status : 0);
+    if (!className) {
+      continue;
+    }
+    if (match.index > lastIndex) {
+      fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+    const span = document.createElement('span');
+    span.className = className;
+    span.dataset.lingqHl = entry.inDb ? String(entry.status) : 'new';
+    span.textContent = raw;
+    fragment.appendChild(span);
+    lastIndex = match.index + raw.length;
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+  if (lastIndex < text.length) {
+    fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
+  textNode.parentNode?.replaceChild(fragment, textNode);
+}
+
+function startHighlightObserver() {
+  if (highlightObserver || !document.body) {
+    return;
+  }
+  highlightObserver = new MutationObserver((mutations) => {
+    if (highlightApplying || !enabled || !highlightEnabled) {
+      return;
+    }
+    const roots = [];
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          if (node.classList?.contains(HIGHLIGHT_CLASS) || node.id === TOOLTIP_ID) {
+            return;
+          }
+          roots.push(node);
+        } else if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
+          roots.push(node.parentElement);
+        }
+      });
+    }
+    if (roots.length === 0) {
+      return;
+    }
+    window.clearTimeout(highlightMutationTimer);
+    highlightMutationTimer = window.setTimeout(() => {
+      const runId = highlightRunId;
+      roots.forEach((root) => {
+        if (root.isConnected && !isHighlightSkipped(root)) {
+          applyHighlightsToRoot(root, runId).catch(() => {});
+        }
+      });
+    }, 400);
+  });
+  highlightObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+function stopHighlightObserver() {
+  if (highlightObserver) {
+    highlightObserver.disconnect();
+    highlightObserver = null;
+  }
+  window.clearTimeout(highlightMutationTimer);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => schedulePageHighlight(), { once: true });
+} else {
+  schedulePageHighlight();
 }

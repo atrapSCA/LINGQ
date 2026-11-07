@@ -19,6 +19,7 @@ const DEFAULTS = {
   supabaseEnabled: true,
   supabaseUrl: '',
   supabaseKey: '',
+  highlightEnabled: true,
 };
 
 const CHATGPT_MODEL_PRICES = {
@@ -69,6 +70,7 @@ const supabaseSettingsBlock = document.getElementById('supabase-settings-block')
 const supabaseUrlInput = document.getElementById('supabase-url');
 const supabaseKeyInput = document.getElementById('supabase-key');
 const clickCountInput = document.getElementById('click-count');
+const highlightEnabledInput = document.getElementById('highlight-enabled');
 const latencyIdleMinInput = document.getElementById('latency-idle-min');
 const latencyIdleMaxInput = document.getElementById('latency-idle-max');
 const adminIdleSettings = document.getElementById('admin-idle-settings');
@@ -266,6 +268,9 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   supabaseUrlInput.value = settings.supabaseUrl || DEFAULTS.supabaseUrl;
   supabaseKeyInput.value = settings.supabaseKey || DEFAULTS.supabaseKey;
   clickCountInput.value = Number(settings.clickCount) === 2 ? '2' : '1';
+  if (highlightEnabledInput) {
+    highlightEnabledInput.checked = settings.highlightEnabled !== false;
+  }
   const idleRange = normalizeIdleRange(settings);
   latencyIdleMinInput.value = String(idleRange.min);
   latencyIdleMaxInput.value = String(idleRange.max);
@@ -330,6 +335,7 @@ form.addEventListener('submit', async (event) => {
     phraseTranslationSource,
     language: languageInput.value,
     targetLanguage: targetLanguageInput.value,
+    highlightEnabled: highlightEnabledInput ? highlightEnabledInput.checked : true,
     supabaseEnabled,
     supabaseUrl: supabaseUrlInput.value.trim().replace(/\/$/, ''),
     supabaseKey: supabaseKeyInput.value.trim(),
@@ -497,6 +503,14 @@ clickCountInput.addEventListener('change', () => {
   const clickCount = clickCountInput.value === '2' ? 2 : 1;
   chrome.storage.sync.set({ clickCount });
   renderClickHelp(clickCount);
+});
+
+highlightEnabledInput?.addEventListener('change', () => {
+  if (highlightEnabledInput.disabled || !supabaseReady) {
+    highlightEnabledInput.checked = false;
+    return;
+  }
+  chrome.storage.sync.set({ highlightEnabled: highlightEnabledInput.checked });
 });
 
 function saveIdleRange() {
@@ -997,6 +1011,19 @@ function applyDbGateUi() {
   }
   if (resetLingqImportButton) {
     resetLingqImportButton.disabled = !supabaseReady;
+  }
+  if (highlightEnabledInput) {
+    highlightEnabledInput.disabled = !supabaseReady;
+    const highlightHeader = highlightEnabledInput.closest('.settings-section__header');
+    highlightHeader?.classList.toggle('is-disabled', !supabaseReady);
+    if (!supabaseReady) {
+      highlightEnabledInput.checked = false;
+    } else {
+      // Po opětovném připojení DB obnov preferenci ze storage.
+      chrome.storage.sync.get({ highlightEnabled: true }, (settings) => {
+        highlightEnabledInput.checked = settings.highlightEnabled !== false;
+      });
+    }
   }
   // Zobrazení/skrytí banneru mění výšku chrome — nenech focus odscrollovat menu.
   if (panelSettings && !panelSettings.hidden) {

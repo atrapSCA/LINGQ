@@ -86,6 +86,15 @@
             </select>
             <p class="help" id="click-help" data-i18n="settings.clickHelp1">U odkazů je potřeba dvojité kliknutí, aby se stránka neotevřela.</p>
 
+            <div class="settings-section__header settings-section__header--inline">
+              <label class="settings-inline-label" for="highlight-enabled" data-i18n="settings.highlight">Podbarvit slovíčka na stránce</label>
+              <label class="switch" data-i18n-title="settings.highlight" title="Podbarvit slovíčka na stránce">
+                <input type="checkbox" id="highlight-enabled" checked />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <p class="help" data-i18n="settings.highlightHelp">Po načtení stránky: neznámá (mimo DB) modře; 1 nejsilnější žlutá → 4 slabá žlutá; známá (K) a slovíčka v DB bez překladu bez barvy. Jen Supabase DB, ne LingQ API.</p>
+
             <div id="translation-source-block" hidden>
               <label for="new-word-source" data-i18n="settings.newWordSource">Nová slovíčka překládat přes</label>
               <select id="new-word-source">

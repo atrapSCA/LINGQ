@@ -497,6 +497,22 @@ input, select { width: 100%; border: 0; outline: none; background: transparent; 
   justify-content: space-between;
   gap: 12px;
 }
+.settings-section__header--inline {
+  margin-top: 14px;
+}
+.settings-section__header.is-disabled {
+  opacity: 0.62;
+}
+.settings-section__header.is-disabled .switch {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.settings-inline-label {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
 .settings-section__title {
   margin: 0;
   color: var(--text);
