@@ -321,9 +321,60 @@
   font-weight: 500;
 }
 
-#lingq-click-translator-tooltip.lingq-tooltip--loading .lingq-tooltip__translation {
+#lingq-click-translator-tooltip.lingq-tooltip--loading .lingq-tooltip__translation,
+#lingq-click-translator-tooltip.lingq-tooltip--phrase-loading .lingq-tooltip__phrase-translation {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 1.4em;
+  padding-bottom: 10px;
   color: #b8c5cb;
   font-weight: 500;
+  overflow: hidden;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__loading {
+  width: 100%;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__spinner {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(184, 197, 203, 0.35);
+  border-top-color: #8bd7c4;
+  border-radius: 50%;
+  animation: lingq-tooltip-spin 0.75s linear infinite;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__loading-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#lingq-click-translator-tooltip .lingq-tooltip__loading-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #8bd7c4, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: lingq-tooltip-loading-bar 1.15s ease-in-out infinite;
+}
+
+@keyframes lingq-tooltip-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes lingq-tooltip-loading-bar {
+  0% { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
 }
 
 #lingq-click-translator-tooltip.lingq-tooltip--unknown {
@@ -493,6 +544,17 @@
 #lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--phrase-error .lingq-tooltip__phrase-translation,
 #lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--loading .lingq-tooltip__translation {
   color: #6b7b80;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__spinner {
+  border-color: rgba(107, 123, 128, 0.28);
+  border-top-color: #1f7f68;
+}
+
+#lingq-click-translator-tooltip[data-theme="light"] .lingq-tooltip__loading-bar {
+  background: linear-gradient(90deg, transparent, #1f7f68, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
 }
 
 #lingq-click-translator-tooltip[data-theme="light"].lingq-tooltip--phrase-external .lingq-tooltip__phrase-translation {

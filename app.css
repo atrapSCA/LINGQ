@@ -1075,6 +1075,9 @@ label[for="supabase-key"] { margin-top: 14px; }
   background: var(--known-bg);
   color: var(--known-text);
 }
+.word-row__status-icon {
+  display: block;
+}
 .words-empty {
   padding: 24px 16px;
   color: var(--text-muted);

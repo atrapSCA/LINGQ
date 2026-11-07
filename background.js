@@ -69,9 +69,12 @@ const CONTENT_ONLY_MESSAGES = new Set([
   'LOOKUP_WORD',
   'TRANSLATE_PHRASE',
   'UPDATE_STATUS',
-  'UPDATE_TRANSLATION',
   'GET_ALTERNATIVES',
   'GET_HIGHLIGHT_MAP',
+]);
+/** Povoleno z content scriptu i ze stránky doplňku (slovník v app.html). */
+const SHARED_MESSAGES = new Set([
+  'UPDATE_TRANSLATION',
 ]);
 const EXTENSION_ONLY_MESSAGES = new Set([
   'OPEN_APP',
@@ -180,7 +183,7 @@ function authorizeMessage(type, sender) {
   if (EXTENSION_ONLY_MESSAGES.has(type)) {
     return isExtensionPageSender(sender);
   }
-  if (type === 'NOTE_ACTIVITY') {
+  if (SHARED_MESSAGES.has(type) || type === 'NOTE_ACTIVITY') {
     return isContentScriptSender(sender) || isExtensionPageSender(sender);
   }
   return false;

@@ -2070,9 +2070,15 @@ function renderWords(options = {}) {
 
     const status = document.createElement('span');
     const statusLabel = formatStatus(item.status);
-    status.className = `word-row__status${statusLabel === 'K' ? ' word-row__status--known' : ''}`;
-    status.textContent = statusLabel;
+    const isKnown = statusLabel === 'K';
+    status.className = `word-row__status${isKnown ? ' word-row__status--known' : ''}`;
+    if (isKnown) {
+      status.innerHTML = '<svg class="word-row__status-icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M9.2 16.6 4.8 12.2l1.4-1.4 3 3 8-8 1.4 1.4z"/></svg>';
+    } else {
+      status.textContent = statusLabel;
+    }
     status.title = t('words.levelAria', { level: statusLabel });
+    status.setAttribute('aria-label', t('words.levelAria', { level: statusLabel }));
 
     const remove = document.createElement('button');
     remove.type = 'button';

@@ -36,6 +36,7 @@ let highlightApplying = false;
 let highlightBusyEl = null;
 let highlightBusyShowTimer = 0;
 let highlightBusyToken = 0;
+let loadingHintTimers = [];
 
 let i18nReady = Promise.resolve();
 
@@ -188,10 +189,12 @@ async function handlePhraseSelection(event) {
   const requestId = ++activeRequest;
   const clickedAt = Date.now();
   showPhraseTooltip(selected.text, selected.rect, t('bubble.translatingPhrase'), 'loading');
+  startLoadingHints(requestId, 'phrase');
   chrome.runtime.sendMessage({ type: 'TRANSLATE_PHRASE', text: selected.text, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
+    clearLoadingHints();
     if (chrome.runtime.lastError || !response?.ok) {
       showPhraseTooltip(selected.text, selected.rect, response?.error || t('bubble.phraseFailed'), 'error');
       return;
@@ -250,11 +253,13 @@ async function lookupFromPoint(clientX, clientY, target, event) {
   await ensureI18n();
   const requestId = ++activeRequest;
   showTooltip(selection.word, selection.rect, t('bubble.translatingWord'), 'loading', 0, null, []);
+  startLoadingHints(requestId, 'word');
 
   chrome.runtime.sendMessage({ type: 'LOOKUP_WORD', word: selection.word, clickedAt }, (response) => {
     if (requestId !== activeRequest) {
       return;
     }
+    clearLoadingHints();
     if (chrome.runtime.lastError || !response?.ok) {
       showTooltip(selection.word, selection.rect, response?.error || t('bubble.lingqFailed'), 'error', 0, null, []);
       return;
@@ -326,7 +331,12 @@ function showPhraseTooltip(sentence, rect, translation, state) {
     <div class="lingq-tooltip__actions"></div>
   `;
   tooltip.querySelector('.lingq-tooltip__sentence').textContent = sentence;
-  tooltip.querySelector('.lingq-tooltip__phrase-translation').textContent = translation;
+  const phraseTranslation = tooltip.querySelector('.lingq-tooltip__phrase-translation');
+  if (state === 'loading') {
+    fillLoadingTranslation(phraseTranslation, translation);
+  } else {
+    phraseTranslation.textContent = translation;
+  }
   tooltip.querySelector('.lingq-tooltip__close').addEventListener('click', hideTooltip);
 
   const actions = tooltip.querySelector('.lingq-tooltip__actions');
@@ -513,7 +523,11 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
   tooltip.innerHTML = `<div class="lingq-tooltip__top"><span class="lingq-tooltip__word"></span><button class="lingq-tooltip__close" type="button" aria-label="${t('bubble.close')}">×</button></div><span class="lingq-tooltip__translation"></span><span class="lingq-tooltip__views" hidden></span><div class="lingq-tooltip__levels" role="group" aria-label="${t('bubble.knowledgeGroup')}"></div><button class="lingq-tooltip__alternatives" type="button"></button><div class="lingq-tooltip__alternative-list" hidden></div><div class="lingq-tooltip__actions" hidden></div><span class="lingq-tooltip__message" role="status"></span>`;
   tooltip.querySelector('.lingq-tooltip__word').textContent = word;
   const translationElement = tooltip.querySelector('.lingq-tooltip__translation');
-  translationElement.textContent = translation;
+  if (kind === 'loading') {
+    fillLoadingTranslation(translationElement, translation);
+  } else {
+    translationElement.textContent = translation;
+  }
   const viewsElement = tooltip.querySelector('.lingq-tooltip__views');
   const seenCount = Number(viewCount);
   if (Number.isInteger(seenCount) && seenCount > 1 && kind !== 'loading' && kind !== 'error') {
@@ -915,7 +929,53 @@ function showTooltipMessage(message) {
   }
 }
 
+function fillLoadingTranslation(element, label) {
+  if (!element) {
+    return;
+  }
+  element.classList.add('lingq-tooltip__loading');
+  element.innerHTML = `
+    <span class="lingq-tooltip__spinner" aria-hidden="true"></span>
+    <span class="lingq-tooltip__loading-text"></span>
+    <span class="lingq-tooltip__loading-bar" aria-hidden="true"></span>
+  `;
+  const text = element.querySelector('.lingq-tooltip__loading-text');
+  if (text) {
+    text.textContent = label;
+  }
+}
+
+function clearLoadingHints() {
+  loadingHintTimers.forEach((id) => window.clearTimeout(id));
+  loadingHintTimers = [];
+}
+
+function startLoadingHints(requestId, kind) {
+  clearLoadingHints();
+  const slowKey = kind === 'phrase' ? 'bubble.translatingPhraseSlow' : 'bubble.translatingWordSlow';
+  const stillKey = kind === 'phrase' ? 'bubble.translatingPhraseStill' : 'bubble.translatingWordStill';
+  loadingHintTimers.push(window.setTimeout(() => {
+    if (requestId !== activeRequest || !tooltip?.className.includes('loading')) {
+      return;
+    }
+    const text = tooltip.querySelector('.lingq-tooltip__loading-text');
+    if (text) {
+      text.textContent = t(slowKey);
+    }
+  }, 2500));
+  loadingHintTimers.push(window.setTimeout(() => {
+    if (requestId !== activeRequest || !tooltip?.className.includes('loading')) {
+      return;
+    }
+    const text = tooltip.querySelector('.lingq-tooltip__loading-text');
+    if (text) {
+      text.textContent = t(stillKey);
+    }
+  }, 7000));
+}
+
 function hideTooltip() {
+  clearLoadingHints();
   if (tooltip) {
     tooltip.style.display = 'none';
   }
