@@ -14,7 +14,7 @@
   "popup.highlight.offTitle": "Podbarvení vypnuté",
   "popup.highlight.offDesc": "Slova na stránce nejsou barevně označená",
   "popup.highlight.switch": "Zapnout podbarvení slovíček",
-  "popup.highlight.needDbTitle": "Podbarvení nedostupné",
+  "popup.highlight.needDbTitle": "Podbarvení textu nedostupné",
   "popup.highlight.needDbDesc": "Vyžaduje připojenou Supabase DB",
   "highlight.preparing": "Připravuji podbarvení…",
   "popup.themeTitle": "Tmavé rozhraní",
