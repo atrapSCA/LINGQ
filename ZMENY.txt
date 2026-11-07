@@ -277,6 +277,14 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.5
+7. 11. 2026 12:25
+- Stabilní user release: bezpečnostní zpevnění bez změny běžné funkčnosti.
+- Ověření odesílatele chrome.runtime zpráv (content script vs. stránky doplňku).
+- Rate-limit lookup/překlad/alternatives; respektování vypnutého doplňku i ve service workeru.
+- Ignorování syntetických kliků ze stránky (isTrusted); sdílený download known-words; throttle sync DB→LingQ.
+- Odstraněno nepoužité oprávnění contextMenus.
+
 Verze 0.3.4
 7. 11. 2026 11:40
 - Stabilní user release: veřejný build bez admin role; výchozí LingQ/ChatGPT/Supabase klíče v kódu prázdné.

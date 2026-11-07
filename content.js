@@ -113,7 +113,8 @@ document.addEventListener('click', (event) => {
 }, false);
 
 async function handlePhraseSelection(event) {
-  if (!enabled || event.button !== 0) {
+  // Syntetické eventy ze stránky (dispatchEvent) ignorujeme — běžné kliknutí uživatele projde.
+  if (!event.isTrusted || !enabled || event.button !== 0) {
     return;
   }
 
@@ -163,6 +164,10 @@ async function handlePhraseSelection(event) {
 }
 
 function handleClick(event) {
+  if (!event.isTrusted) {
+    return;
+  }
+
   if (phraseSelectionActive) {
     event.preventDefault();
     event.stopPropagation();
@@ -485,7 +490,12 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
       }
       button.textContent = label;
       button.title = t('bubble.setLevel', { level: label });
-      button.addEventListener('click', () => changeStatus(value));
+      button.addEventListener('click', (event) => {
+        if (!event.isTrusted) {
+          return;
+        }
+        changeStatus(value);
+      });
       levels.appendChild(button);
     });
   }
@@ -499,7 +509,10 @@ function showTooltip(word, rect, translation, kind, status, cardId, translations
     alternativeButton.hidden = false;
     alternativeButton.textContent = alternativesButtonLabel(source, 'show');
     // API (LingQ / ChatGPT) se volá až po kliknutí — nic se nenačítá předem.
-    alternativeButton.addEventListener('click', () => {
+    alternativeButton.addEventListener('click', (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
       if (tooltip.dataset.alternativesLoaded !== 'true') {
         loadAlternativeTranslations(word, translation, alternativeButton, alternativeList, translationElement, rect);
         return;
@@ -538,6 +551,9 @@ function populateAlternativeList(alternativeList, meaningLines, translationEleme
     addButton.title = t('bubble.altAdd');
     addButton.setAttribute('aria-label', t('bubble.altAdd'));
     addButton.addEventListener('click', (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       addMeaningToTranslation(line, item, translationElement);
@@ -713,7 +729,10 @@ function enableTranslationEditing(element) {
   element.title = t('bubble.editTranslation');
   element.spellcheck = true;
 
-  element.addEventListener('click', () => {
+  element.addEventListener('click', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
     if (element.getAttribute('contenteditable') === 'true') {
       return;
     }

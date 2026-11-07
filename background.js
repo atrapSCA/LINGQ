@@ -58,8 +58,112 @@ const LATENCY_ALARM = 'lingq-latency-watch';
 const PROBE_FALLBACK_WORD = 'the';
 const PROBE_LANGUAGE = 'en';
 const APP_PAGE = 'app.html';
+const EXTENSION_ORIGIN = `chrome-extension://${chrome.runtime.id}/`;
+const CONTENT_ONLY_MESSAGES = new Set([
+  'LOOKUP_WORD',
+  'TRANSLATE_PHRASE',
+  'UPDATE_STATUS',
+  'UPDATE_TRANSLATION',
+  'GET_ALTERNATIVES',
+]);
+const EXTENSION_ONLY_MESSAGES = new Set([
+  'OPEN_APP',
+  'APP_OPENED',
+  'SYNC_DB_TO_LINGQ',
+  'GET_LINGQ_SYNC_STATUS',
+  'VALIDATE_CHATGPT_KEY',
+  'GET_SUPABASE_STATUS',
+  'COUNT_SUPABASE_WORDS',
+  'LIST_SUPABASE_WORDS_FILTER',
+  'LIST_SUPABASE_WORDS',
+  'LIST_SUPABASE_WORDS_PAGE',
+  'CHECK_SUPABASE_SCHEMA',
+  'PREPARE_SUPABASE_INSTALL',
+  'DELETE_WORD',
+  'SYNC_KNOWN_WORDS',
+  'GET_KNOWN_WORDS_SYNC_STATUS',
+  'RESET_LINGQ_IMPORT_PROGRESS',
+  'GET_USAGE_STATS',
+  'GET_LATENCY_STATS',
+]);
+const ENABLED_GATED_MESSAGES = new Set([
+  'LOOKUP_WORD',
+  'TRANSLATE_PHRASE',
+  'UPDATE_STATUS',
+  'UPDATE_TRANSLATION',
+  'GET_ALTERNATIVES',
+]);
+/** Limity jsou vysoko nad běžným používáním; brání spam ze stránky. */
+const MESSAGE_RATE_LIMITS = {
+  LOOKUP_WORD: { windowMs: 60_000, max: 45 },
+  TRANSLATE_PHRASE: { windowMs: 60_000, max: 25 },
+  GET_ALTERNATIVES: { windowMs: 60_000, max: 30 },
+  UPDATE_STATUS: { windowMs: 60_000, max: 60 },
+  UPDATE_TRANSLATION: { windowMs: 60_000, max: 60 },
+};
+const rateLimitBuckets = new Map();
 let activeUserLookups = 0;
 let appTabId = null;
+let knownWordsFetchPromise = null;
+
+function isExtensionPageSender(sender) {
+  const url = String(sender?.url || sender?.tab?.url || '');
+  return url.startsWith(EXTENSION_ORIGIN);
+}
+
+function isContentScriptSender(sender) {
+  if (!Number.isInteger(sender?.tab?.id)) {
+    return false;
+  }
+  return !isExtensionPageSender(sender);
+}
+
+function authorizeMessage(type, sender) {
+  if (!type || typeof type !== 'string') {
+    return false;
+  }
+  if (CONTENT_ONLY_MESSAGES.has(type)) {
+    return isContentScriptSender(sender);
+  }
+  if (EXTENSION_ONLY_MESSAGES.has(type)) {
+    return isExtensionPageSender(sender);
+  }
+  if (type === 'NOTE_ACTIVITY') {
+    return isContentScriptSender(sender) || isExtensionPageSender(sender);
+  }
+  return false;
+}
+
+function consumeRateLimit(type, sender) {
+  const config = MESSAGE_RATE_LIMITS[type];
+  if (!config) {
+    return true;
+  }
+  const key = `${type}:${sender?.tab?.id ?? 'ext'}`;
+  const now = Date.now();
+  const stamps = (rateLimitBuckets.get(key) || []).filter((ts) => now - ts < config.windowMs);
+  if (stamps.length >= config.max) {
+    rateLimitBuckets.set(key, stamps);
+    return false;
+  }
+  stamps.push(now);
+  rateLimitBuckets.set(key, stamps);
+  return true;
+}
+
+function gateUserAction(type, sender, sendResponse, run) {
+  chrome.storage.sync.get({ enabled: true }, (settings) => {
+    if (settings.enabled === false) {
+      sendResponse({ ok: false, error: bt('err.extensionOff') });
+      return;
+    }
+    if (!consumeRateLimit(type, sender)) {
+      sendResponse({ ok: false, error: bt('err.rateLimited') });
+      return;
+    }
+    run();
+  });
+}
 
 function iconPaths(enabled) {
   const state = enabled ? 'on' : 'off';
@@ -162,26 +266,32 @@ async function openAppPage() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'OPEN_APP') {
+  const type = message?.type;
+  if (!authorizeMessage(type, sender)) {
+    sendResponse({ ok: false, error: bt('err.denied') });
+    return false;
+  }
+
+  if (type === 'OPEN_APP') {
     openAppPage()
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
     return true;
   }
 
-  if (message.type === 'SYNC_DB_TO_LINGQ') {
+  if (type === 'SYNC_DB_TO_LINGQ') {
     syncDbToLingq()
       .then((state) => sendResponse({ ok: true, sync: state }))
       .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
     return true;
   }
 
-  if (message.type === 'GET_LINGQ_SYNC_STATUS') {
+  if (type === 'GET_LINGQ_SYNC_STATUS') {
     sendResponse({ ok: true, sync: lingqSyncState });
     return false;
   }
 
-  if (message.type === 'APP_OPENED') {
+  if (type === 'APP_OPENED') {
     if (sender.tab?.id != null) {
       appTabId = sender.tab.id;
     }
@@ -189,101 +299,111 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === 'LOOKUP_WORD') {
-    noteUserActivity();
-    activeUserLookups += 1;
-    const startedAt = Number(message.clickedAt) || Date.now();
-    lookupWord(message.word)
-      .then((result) => {
-        sendResponse({ ok: true, ...result });
-        recordLatency({
-          source: 'click',
-          word: result.word || message.word,
-          wordStatus: latencyWordStatus(result),
-          durationMs: Date.now() - startedAt,
-          ok: true,
+  if (type === 'LOOKUP_WORD') {
+    gateUserAction(type, sender, sendResponse, () => {
+      noteUserActivity();
+      activeUserLookups += 1;
+      const startedAt = Number(message.clickedAt) || Date.now();
+      lookupWord(message.word)
+        .then((result) => {
+          sendResponse({ ok: true, ...result });
+          recordLatency({
+            source: 'click',
+            word: result.word || message.word,
+            wordStatus: latencyWordStatus(result),
+            durationMs: Date.now() - startedAt,
+            ok: true,
+          });
+        })
+        .catch((error) => {
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+          recordLatency({
+            source: 'click',
+            word: message.word,
+            durationMs: Date.now() - startedAt,
+            ok: false,
+            error: getErrorMessage(error),
+          });
+        })
+        .finally(() => {
+          activeUserLookups = Math.max(0, activeUserLookups - 1);
         });
-      })
-      .catch((error) => {
-        sendResponse({ ok: false, error: getErrorMessage(error) });
-        recordLatency({
-          source: 'click',
-          word: message.word,
-          durationMs: Date.now() - startedAt,
-          ok: false,
-          error: getErrorMessage(error),
-        });
-      })
-      .finally(() => {
-        activeUserLookups = Math.max(0, activeUserLookups - 1);
-      });
+    });
     return true;
   }
 
-  if (message.type === 'NOTE_ACTIVITY') {
+  if (type === 'NOTE_ACTIVITY') {
     noteUserActivity();
     return false;
   }
 
-  if (message.type === 'UPDATE_STATUS') {
-    noteUserActivity();
-    updateStatus(message.cardId, message.status, message.word, message.translation)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+  if (type === 'UPDATE_STATUS') {
+    gateUserAction(type, sender, sendResponse, () => {
+      noteUserActivity();
+      updateStatus(message.cardId, message.status, message.word, message.translation)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    });
     return true;
   }
 
-  if (message.type === 'UPDATE_TRANSLATION') {
-    noteUserActivity();
-    updateTranslation(message.cardId, message.word, message.translation)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+  if (type === 'UPDATE_TRANSLATION') {
+    gateUserAction(type, sender, sendResponse, () => {
+      noteUserActivity();
+      updateTranslation(message.cardId, message.word, message.translation)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    });
     return true;
   }
 
-  if (message.type === 'VALIDATE_CHATGPT_KEY') {
+  if (type === 'VALIDATE_CHATGPT_KEY') {
     validateChatgptApiKey(message.apiKey)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('err.chatgptValidate') }));
     return true;
   }
 
-  if (message.type === 'GET_ALTERNATIVES') {
-    noteUserActivity();
-    getAlternativeTranslations(message.word, message.currentTranslation)
-      .then((translations) => reply(sendResponse, { ok: true, translations }))
-      .catch((error) => reply(sendResponse, { ok: false, error: getErrorMessage(error) }));
+  if (type === 'GET_ALTERNATIVES') {
+    gateUserAction(type, sender, sendResponse, () => {
+      noteUserActivity();
+      getAlternativeTranslations(message.word, message.currentTranslation)
+        .then((translations) => reply(sendResponse, { ok: true, translations }))
+        .catch((error) => reply(sendResponse, { ok: false, error: getErrorMessage(error) }));
+    });
     return true;
   }
 
-  if (message.type === 'TRANSLATE_PHRASE') {
-    noteUserActivity();
-    const startedAt = Number(message.clickedAt) || Date.now();
-    translatePhrase(message.text)
-      .then((result) => {
-        sendResponse({ ok: true, ...result });
-        recordLatency({
-          source: 'phrase',
-          word: result.sentence || message.text,
-          durationMs: Date.now() - startedAt,
-          ok: true,
+  if (type === 'TRANSLATE_PHRASE') {
+    gateUserAction(type, sender, sendResponse, () => {
+      noteUserActivity();
+      const startedAt = Number(message.clickedAt) || Date.now();
+      translatePhrase(message.text)
+        .then((result) => {
+          sendResponse({ ok: true, ...result });
+          recordLatency({
+            source: 'phrase',
+            word: result.sentence || message.text,
+            durationMs: Date.now() - startedAt,
+            ok: true,
+          });
+          logUsageEvent('phrase', { word: result.sentence || message.text });
+        })
+        .catch((error) => {
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+          recordLatency({
+            source: 'phrase',
+            word: message.text,
+            durationMs: Date.now() - startedAt,
+            ok: false,
+            error: getErrorMessage(error),
+          });
         });
-        logUsageEvent('phrase', { word: result.sentence || message.text });
-      })
-      .catch((error) => {
-        sendResponse({ ok: false, error: getErrorMessage(error) });
-        recordLatency({
-          source: 'phrase',
-          word: message.text,
-          durationMs: Date.now() - startedAt,
-          ok: false,
-          error: getErrorMessage(error),
-        });
-      });
+    });
     return true;
   }
 
-  if (message.type === 'GET_SUPABASE_STATUS') {
+  if (type === 'GET_SUPABASE_STATUS') {
     getSupabaseGate({ force: Boolean(message.force) })
       .then((gate) => sendResponse({ ok: true, ...gate }))
       .catch((error) => sendResponse({
@@ -295,7 +415,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'COUNT_SUPABASE_WORDS') {
+  if (type === 'COUNT_SUPABASE_WORDS') {
     requireSupabaseReady()
       .then(() => countSupabaseWords())
       .then((total) => sendResponse({ ok: true, total }))
@@ -303,7 +423,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'LIST_SUPABASE_WORDS_FILTER') {
+  if (type === 'LIST_SUPABASE_WORDS_FILTER') {
     requireSupabaseReady()
       .then(() => listSupabaseWordsByFilter(message))
       .then((result) => sendResponse({ ok: true, ...result }))
@@ -311,7 +431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'LIST_SUPABASE_WORDS') {
+  if (type === 'LIST_SUPABASE_WORDS') {
     requireSupabaseReady()
       .then(() => listSupabaseWords())
       .then((words) => sendResponse({ ok: true, words }))
@@ -319,7 +439,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'LIST_SUPABASE_WORDS_PAGE') {
+  if (type === 'LIST_SUPABASE_WORDS_PAGE') {
     requireSupabaseReady()
       .then(() => listSupabaseWordsPage(message.offset, message.limit))
       .then((page) => sendResponse({ ok: true, ...page }))
@@ -327,7 +447,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'CHECK_SUPABASE_SCHEMA') {
+  if (type === 'CHECK_SUPABASE_SCHEMA') {
     checkSupabaseSchema(message.settings || null)
       .then((result) => {
         rememberSupabaseReady(
@@ -354,7 +474,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'PREPARE_SUPABASE_INSTALL') {
+  if (type === 'PREPARE_SUPABASE_INSTALL') {
     prepareSupabaseInstall(message.settings || null)
       .then((result) => {
         rememberSupabaseReady(
@@ -374,7 +494,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'DELETE_WORD') {
+  if (type === 'DELETE_WORD') {
     noteUserActivity();
     requireSupabaseReady()
       .then(() => deleteWordEverywhere(message.word, message.cardId))
@@ -386,7 +506,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'SYNC_KNOWN_WORDS') {
+  if (type === 'SYNC_KNOWN_WORDS') {
     noteUserActivity();
     requireSupabaseReady()
       .then(() => syncKnownWordsToSupabase())
@@ -398,7 +518,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'GET_KNOWN_WORDS_SYNC_STATUS') {
+  if (type === 'GET_KNOWN_WORDS_SYNC_STATUS') {
     requireSupabaseReady()
       .then(() => chrome.storage.sync.get(DEFAULTS))
       .then((settings) => ensureImportProgress(settings, { forceRefreshTotals: Boolean(message.refreshTotals) }))
@@ -414,7 +534,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'RESET_LINGQ_IMPORT_PROGRESS') {
+  if (type === 'RESET_LINGQ_IMPORT_PROGRESS') {
     requireSupabaseReady()
       .then(() => chrome.storage.sync.get(DEFAULTS))
       .then(async (settings) => {
@@ -430,7 +550,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'GET_USAGE_STATS') {
+  if (type === 'GET_USAGE_STATS') {
     requireSupabaseReady()
       .then(() => getUsageStats(message.period))
       .then((stats) => sendResponse({ ok: true, stats }))
@@ -438,7 +558,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'GET_LATENCY_STATS') {
+  if (type === 'GET_LATENCY_STATS') {
     requireSupabaseReady()
       .then(() => getLatencyStats())
       .then((latency) => sendResponse({ ok: true, latency }))
@@ -764,6 +884,8 @@ async function syncDbToLingq() {
           done: lingqSyncState.done,
           total: lingqSyncState.total,
         });
+      // Krátká pauza mezi řádky — stejný výsledek, méně nárazů na LingQ API.
+      await sleep(80);
     }
 
     lingqSyncState.running = false;
@@ -1493,50 +1615,69 @@ async function loadKnownWords(settings) {
 }
 
 async function fetchAllKnownWords(settings, { onProgress } = {}) {
-  const language = encodeURIComponent(settings.language);
-  const bases = [
-    `https://www.lingq.com/api/v2/${language}/known-words/`,
-    `https://www.lingq.com/api/v3/${language}/known-words/`,
-  ];
-  const now = Date.now();
-
-  for (const base of bases) {
-    const words = new Set();
-    try {
-      let url = `${base}?page=1&page_size=${KNOWN_WORDS_PAGE_SIZE}`;
-      for (let page = 0; url && page < KNOWN_WORDS_MAX_PAGES; page += 1) {
-        await noteUserActivity();
-        const response = await lingqRequest(url, settings, { method: 'GET' });
-        const before = words.size;
-        collectKnownWords(response, words);
-        if (typeof onProgress === 'function') {
-          await onProgress({ fetched: words.size, page: page + 1 });
-        }
-        if (page === 0 && words.size === before) {
-          break;
-        }
-        url = typeof response?.next === 'string' ? response.next : '';
-      }
-    } catch {
-      // Použijí se slova stažená před chybou další stránky.
-    }
-
-    if (words.size === 0) {
-      continue;
-    }
-
-    knownWordsCache = words;
-    knownWordsCachedAt = now;
-    knownWordsLanguage = settings.language;
-    await chrome.storage.local.set({
-      knownWords: [...words],
-      knownWordsAt: now,
-      knownLanguage: settings.language,
-    });
-    return knownWordsCache;
+  // Souběžné lookupy sdílí jeden download — stejná data, bez násobení requestů.
+  if (!onProgress && knownWordsFetchPromise) {
+    return knownWordsFetchPromise;
   }
 
-  return null;
+  const run = (async () => {
+    const language = encodeURIComponent(settings.language);
+    const bases = [
+      `https://www.lingq.com/api/v2/${language}/known-words/`,
+      `https://www.lingq.com/api/v3/${language}/known-words/`,
+    ];
+    const now = Date.now();
+
+    for (const base of bases) {
+      const words = new Set();
+      try {
+        let url = `${base}?page=1&page_size=${KNOWN_WORDS_PAGE_SIZE}`;
+        for (let page = 0; url && page < KNOWN_WORDS_MAX_PAGES; page += 1) {
+          await noteUserActivity();
+          const response = await lingqRequest(url, settings, { method: 'GET' });
+          const before = words.size;
+          collectKnownWords(response, words);
+          if (typeof onProgress === 'function') {
+            await onProgress({ fetched: words.size, page: page + 1 });
+          }
+          if (page === 0 && words.size === before) {
+            break;
+          }
+          url = typeof response?.next === 'string' ? response.next : '';
+        }
+      } catch {
+        // Použijí se slova stažená před chybou další stránky.
+      }
+
+      if (words.size === 0) {
+        continue;
+      }
+
+      knownWordsCache = words;
+      knownWordsCachedAt = now;
+      knownWordsLanguage = settings.language;
+      await chrome.storage.local.set({
+        knownWords: [...words],
+        knownWordsAt: now,
+        knownLanguage: settings.language,
+      });
+      return knownWordsCache;
+    }
+
+    return null;
+  })();
+
+  if (!onProgress) {
+    const tracked = run.finally(() => {
+      if (knownWordsFetchPromise === tracked) {
+        knownWordsFetchPromise = null;
+      }
+    });
+    knownWordsFetchPromise = tracked;
+    return tracked;
+  }
+
+  return run;
 }
 
 async function setKnownWordsSyncProgress(progress) {
