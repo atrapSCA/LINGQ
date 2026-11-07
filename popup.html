@@ -17,6 +17,17 @@
         </div>
       </header>
 
+      <aside class="update-alert" id="update-alert" hidden role="status">
+        <div class="update-alert__body">
+          <strong class="update-alert__title" data-i18n="update.title">Nová verze na GitHubu</strong>
+          <p class="update-alert__text" id="update-alert-text"></p>
+        </div>
+        <div class="update-alert__actions">
+          <a class="update-alert__button" id="update-alert-open" href="#" target="_blank" rel="noopener noreferrer" data-i18n="update.openGithub">Otevřít GitHub</a>
+          <button type="button" class="update-alert__dismiss" id="update-alert-dismiss" data-i18n="update.dismiss">Později</button>
+        </div>
+      </aside>
+
       <div class="status-card">
         <span class="status-dot" id="status-dot"></span>
         <div>

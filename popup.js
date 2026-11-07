@@ -11,8 +11,13 @@ const openAppButton = document.getElementById('open-app');
 const themeDarkInput = document.getElementById('theme-dark');
 const themeDescription = document.getElementById('theme-description');
 const uiLocaleInput = document.getElementById('ui-locale');
+const updateAlert = document.getElementById('update-alert');
+const updateAlertText = document.getElementById('update-alert-text');
+const updateAlertOpen = document.getElementById('update-alert-open');
+const updateAlertDismiss = document.getElementById('update-alert-dismiss');
 let highlightPreference = true;
 let supabaseDbReady = false;
+let latestUpdateStatus = null;
 
 function t(key, vars) {
   return window.LingqI18n ? LingqI18n.t(key, vars) : key;
@@ -25,10 +30,57 @@ function refreshPopupTexts() {
   renderStatus(enabledInput.checked);
   renderHighlight();
   renderTheme(themeDarkInput.checked ? 'dark' : 'light', { skipApply: true });
+  renderUpdateAlert(latestUpdateStatus);
   if (uiLocaleInput) {
     uiLocaleInput.value = LingqI18n.getLocale();
   }
 }
+
+function renderUpdateAlert(status) {
+  latestUpdateStatus = status || null;
+  if (!updateAlert) {
+    return;
+  }
+  const available = Boolean(status?.updateAvailable && status.latestVersion);
+  updateAlert.hidden = !available;
+  if (!available) {
+    return;
+  }
+  if (updateAlertText) {
+    updateAlertText.textContent = t('update.text', {
+      latest: status.latestVersion,
+      current: status.currentVersion || '?',
+    });
+  }
+  if (updateAlertOpen) {
+    updateAlertOpen.href = status.releaseUrl || 'https://github.com/atrapSCA/LINGQ/releases';
+  }
+}
+
+function refreshUpdateStatus({ forceCheck = false } = {}) {
+  const type = forceCheck ? 'CHECK_FOR_UPDATE' : 'GET_UPDATE_STATUS';
+  chrome.runtime.sendMessage({ type }, (response) => {
+    if (chrome.runtime.lastError || !response?.ok) {
+      return;
+    }
+    renderUpdateAlert(response);
+  });
+}
+
+updateAlertDismiss?.addEventListener('click', () => {
+  chrome.runtime.sendMessage({
+    type: 'DISMISS_UPDATE',
+    version: latestUpdateStatus?.latestVersion,
+  }, (response) => {
+    if (response?.ok) {
+      renderUpdateAlert(response);
+    } else {
+      if (updateAlert) {
+        updateAlert.hidden = true;
+      }
+    }
+  });
+});
 
 LingqTheme.load((theme) => {
   renderTheme(theme);
@@ -40,6 +92,7 @@ LingqTheme.watch((theme) => {
 
 LingqI18n.load(() => {
   refreshPopupTexts();
+  refreshUpdateStatus({ forceCheck: true });
 });
 
 LingqI18n.watch(() => {

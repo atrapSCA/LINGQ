@@ -152,6 +152,11 @@ const schemaAlert = document.getElementById('schema-alert');
 const schemaAlertText = document.getElementById('schema-alert-text');
 const schemaAlertOpenSettings = document.getElementById('schema-alert-open-settings');
 const dbModeAlert = document.getElementById('db-mode-alert');
+const updateAlert = document.getElementById('update-alert');
+const updateAlertText = document.getElementById('update-alert-text');
+const updateAlertOpen = document.getElementById('update-alert-open');
+const updateAlertDismiss = document.getElementById('update-alert-dismiss');
+let latestUpdateStatus = null;
 
 function t(key, vars) {
   return window.LingqI18n ? LingqI18n.t(key, vars) : key;
@@ -178,6 +183,7 @@ function applyUiLocale() {
     phraseTranslationSource: phraseSourceInput?.value,
   });
   refreshSupabaseGate({ force: false });
+  renderUpdateAlert(latestUpdateStatus);
   // Obnovit kalendář / tabulky s novým jazykem, pokud už jsou načtené.
   if (statsHeatmap?.dataset.loaded) {
     loadStats(true);
@@ -195,6 +201,7 @@ if (window.LingqTheme) {
 if (window.LingqI18n) {
   LingqI18n.load(() => {
     applyUiLocale();
+    refreshUpdateStatus({ forceCheck: true });
   });
   LingqI18n.watch(() => {
     applyUiLocale();
@@ -206,6 +213,7 @@ chrome.runtime.sendMessage({ type: 'APP_OPENED' }, () => {
 });
 
 applyBuildRoleUi();
+refreshUpdateStatus({ forceCheck: false });
 refreshSupabaseGate({ force: true }).finally(() => {
   restoreKnownWordsSyncStatus();
   // První otevření často stihne Slovník dřív, než doběhne kontrola DB — po gate znovu načti aktivní záložku.
@@ -1030,6 +1038,52 @@ function applyDbGateUi() {
     afterSettingsLayout(settingsScrollTop);
   }
 }
+
+function renderUpdateAlert(status) {
+  latestUpdateStatus = status || null;
+  if (!updateAlert) {
+    return;
+  }
+  const available = Boolean(status?.updateAvailable && status.latestVersion);
+  updateAlert.hidden = !available;
+  if (!available) {
+    return;
+  }
+  if (updateAlertText) {
+    updateAlertText.textContent = t('update.text', {
+      latest: status.latestVersion,
+      current: status.currentVersion || '?',
+    });
+  }
+  if (updateAlertOpen) {
+    updateAlertOpen.href = status.releaseUrl || 'https://github.com/atrapSCA/LINGQ/releases';
+  }
+}
+
+function refreshUpdateStatus({ forceCheck = false } = {}) {
+  const type = forceCheck ? 'CHECK_FOR_UPDATE' : 'GET_UPDATE_STATUS';
+  chrome.runtime.sendMessage({ type }, (response) => {
+    if (chrome.runtime.lastError || !response?.ok) {
+      return;
+    }
+    renderUpdateAlert(response);
+  });
+}
+
+updateAlertDismiss?.addEventListener('click', () => {
+  chrome.runtime.sendMessage({
+    type: 'DISMISS_UPDATE',
+    version: latestUpdateStatus?.latestVersion,
+  }, (response) => {
+    if (response?.ok) {
+      renderUpdateAlert(response);
+      return;
+    }
+    if (updateAlert) {
+      updateAlert.hidden = true;
+    }
+  });
+});
 
 function resolveDbStatusText(response = {}) {
   if (response.messageKey) {

@@ -56,6 +56,11 @@ function resolveChatgptModel(settings) {
 }
 
 const LATENCY_ALARM = 'lingq-latency-watch';
+const UPDATE_CHECK_ALARM = 'lingq-github-update-check';
+const GITHUB_REPO = 'atrapSCA/LINGQ';
+const GITHUB_TAGS_URL = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=20`;
+const UPDATE_CHECK_PERIOD_MINUTES = 6 * 60;
+const UPDATE_STATUS_KEY = 'githubUpdateStatus';
 const PROBE_FALLBACK_WORD = 'the';
 const PROBE_LANGUAGE = 'en';
 const APP_PAGE = 'app.html';
@@ -87,6 +92,9 @@ const EXTENSION_ONLY_MESSAGES = new Set([
   'RESET_LINGQ_IMPORT_PROGRESS',
   'GET_USAGE_STATS',
   'GET_LATENCY_STATS',
+  'GET_UPDATE_STATUS',
+  'CHECK_FOR_UPDATE',
+  'DISMISS_UPDATE',
 ]);
 const ENABLED_GATED_MESSAGES = new Set([
   'LOOKUP_WORD',
@@ -232,6 +240,182 @@ function syncActionIcon() {
   chrome.storage.sync.get(DEFAULTS, (settings) => {
     applyActionIcon(settings.enabled).catch(() => {});
   });
+  getStoredUpdateStatus()
+    .then((status) => applyUpdateBadge(status))
+    .catch(() => {});
+}
+
+function getInstalledExtensionVersion() {
+  return String(chrome.runtime.getManifest()?.version || '').trim();
+}
+
+function normalizeVersionTag(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^v/i, '')
+    .replace(/[^0-9.].*$/, '');
+}
+
+function parseVersionParts(version) {
+  return normalizeVersionTag(version)
+    .split('.')
+    .map((part) => Number.parseInt(part, 10))
+    .map((n) => (Number.isFinite(n) ? n : 0));
+}
+
+function compareVersions(left, right) {
+  const a = parseVersionParts(left);
+  const b = parseVersionParts(right);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    if (diff !== 0) {
+      return diff > 0 ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+function defaultUpdateStatus() {
+  return {
+    updateAvailable: false,
+    currentVersion: getInstalledExtensionVersion(),
+    latestVersion: null,
+    releaseUrl: `https://github.com/${GITHUB_REPO}/releases`,
+    checkedAt: null,
+    dismissedVersion: null,
+    error: null,
+  };
+}
+
+async function getStoredUpdateStatus() {
+  const stored = await chrome.storage.local.get(UPDATE_STATUS_KEY);
+  const raw = stored[UPDATE_STATUS_KEY];
+  const base = defaultUpdateStatus();
+  if (!raw || typeof raw !== 'object') {
+    return base;
+  }
+  const latestVersion = raw.latestVersion ? normalizeVersionTag(raw.latestVersion) : null;
+  const dismissedVersion = raw.dismissedVersion ? normalizeVersionTag(raw.dismissedVersion) : null;
+  const currentVersion = getInstalledExtensionVersion();
+  const newer = Boolean(latestVersion && compareVersions(latestVersion, currentVersion) > 0);
+  const dismissed = Boolean(dismissedVersion && latestVersion && dismissedVersion === latestVersion);
+  return {
+    ...base,
+    ...raw,
+    currentVersion,
+    latestVersion,
+    dismissedVersion,
+    updateAvailable: newer && !dismissed,
+    releaseUrl: raw.releaseUrl || (latestVersion
+      ? `https://github.com/${GITHUB_REPO}/releases/tag/v${latestVersion}`
+      : base.releaseUrl),
+  };
+}
+
+async function saveUpdateStatus(status) {
+  await chrome.storage.local.set({ [UPDATE_STATUS_KEY]: status });
+  await applyUpdateBadge(status);
+  return status;
+}
+
+async function applyUpdateBadge(status) {
+  if (status?.updateAvailable) {
+    await chrome.action.setBadgeText({ text: '↑' });
+    await chrome.action.setBadgeBackgroundColor({ color: '#1f7f68' });
+    return;
+  }
+  await chrome.action.setBadgeText({ text: '' });
+}
+
+async function ensureUpdateCheckSchedule() {
+  try {
+    await chrome.alarms.create(UPDATE_CHECK_ALARM, {
+      periodInMinutes: UPDATE_CHECK_PERIOD_MINUTES,
+      delayInMinutes: 1,
+    });
+  } catch {
+    // Alarm API nemusí být dostupné ve všech kontextech.
+  }
+}
+
+async function fetchLatestGithubVersion() {
+  const response = await fetch(GITHUB_TAGS_URL, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(bt('update.checkFailed', { status: response.status }));
+  }
+  const tags = await response.json();
+  if (!Array.isArray(tags) || tags.length === 0) {
+    throw new Error(bt('update.noTags'));
+  }
+  for (const tag of tags) {
+    const name = normalizeVersionTag(tag?.name);
+    if (/^\d+\.\d+/.test(name)) {
+      return {
+        latestVersion: name,
+        releaseUrl: `https://github.com/${GITHUB_REPO}/releases/tag/v${name}`,
+      };
+    }
+  }
+  throw new Error(bt('update.noTags'));
+}
+
+async function checkGithubUpdate({ force = false } = {}) {
+  const previous = await getStoredUpdateStatus();
+  const now = Date.now();
+  const checkedAt = Number(previous.checkedAt) || 0;
+  if (!force && checkedAt && now - checkedAt < 60 * 60 * 1000) {
+    return previous;
+  }
+
+  try {
+    const remote = await fetchLatestGithubVersion();
+    const currentVersion = getInstalledExtensionVersion();
+    const latestVersion = remote.latestVersion;
+    const dismissedVersion = previous.dismissedVersion || null;
+    const newer = compareVersions(latestVersion, currentVersion) > 0;
+    const dismissed = Boolean(dismissedVersion && dismissedVersion === latestVersion);
+    const status = {
+      updateAvailable: newer && !dismissed,
+      currentVersion,
+      latestVersion,
+      releaseUrl: remote.releaseUrl,
+      checkedAt: now,
+      dismissedVersion,
+      error: null,
+    };
+    return saveUpdateStatus(status);
+  } catch (error) {
+    const status = {
+      ...previous,
+      currentVersion: getInstalledExtensionVersion(),
+      checkedAt: now,
+      error: error instanceof Error ? error.message : bt('update.checkFailedGeneric'),
+    };
+    return saveUpdateStatus(status);
+  }
+}
+
+async function dismissUpdateNotice(version) {
+  const previous = await getStoredUpdateStatus();
+  const dismissedVersion = normalizeVersionTag(version || previous.latestVersion || '');
+  const status = {
+    ...previous,
+    dismissedVersion: dismissedVersion || previous.dismissedVersion,
+    updateAvailable: false,
+  };
+  if (status.latestVersion && status.dismissedVersion === status.latestVersion) {
+    status.updateAvailable = false;
+  } else if (status.latestVersion && compareVersions(status.latestVersion, status.currentVersion) > 0) {
+    status.updateAvailable = status.dismissedVersion !== status.latestVersion;
+  }
+  return saveUpdateStatus(status);
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -239,12 +423,16 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.sync.set(settings);
     applyActionIcon(settings.enabled).catch(() => {});
     ensureLatencyWatch();
+    ensureUpdateCheckSchedule();
+    checkGithubUpdate({ force: true }).catch(() => {});
   });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   syncActionIcon();
   ensureLatencyWatch();
+  ensureUpdateCheckSchedule();
+  checkGithubUpdate({ force: false }).catch(() => {});
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'sync') {
@@ -277,9 +465,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === LATENCY_ALARM) {
     onLatencyAlarm();
   }
+  if (alarm.name === UPDATE_CHECK_ALARM) {
+    checkGithubUpdate({ force: false }).catch(() => {});
+  }
 });
 syncActionIcon();
 ensureLatencyWatch();
+ensureUpdateCheckSchedule();
+checkGithubUpdate({ force: false }).catch(() => {});
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === appTabId) {
@@ -624,6 +817,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(() => getLatencyStats())
       .then((latency) => sendResponse({ ok: true, latency }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('err.latencyLoad') }));
+    return true;
+  }
+
+  if (type === 'GET_UPDATE_STATUS') {
+    getStoredUpdateStatus()
+      .then((status) => sendResponse({ ok: true, ...status }))
+      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    return true;
+  }
+
+  if (type === 'CHECK_FOR_UPDATE') {
+    checkGithubUpdate({ force: true })
+      .then((status) => sendResponse({ ok: true, ...status }))
+      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+    return true;
+  }
+
+  if (type === 'DISMISS_UPDATE') {
+    dismissUpdateNotice(message.version)
+      .then((status) => sendResponse({ ok: true, ...status }))
+      .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
     return true;
   }
 

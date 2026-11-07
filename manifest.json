@@ -1,14 +1,15 @@
 ﻿{
   "manifest_version": 3,
   "name": "LingQ Click Translator",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Click any word on any web page to look up or create a LingQ and see its translation as a tooltip.",
   "permissions": ["storage", "activeTab", "alarms", "clipboardWrite", "webNavigation"],
   "host_permissions": [
     "https://www.lingq.com/*",
     "https://lingq.com/*",
     "https://*.supabase.co/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://api.github.com/*"
   ],
   "background": {
     "service_worker": "background.js"

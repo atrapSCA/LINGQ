@@ -54,6 +54,69 @@ h1 {
   line-height: 1.4;
 }
 
+.update-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 14px 0;
+  padding: 12px;
+  border: 1px solid #2f9f82;
+  border-radius: 10px;
+  background: #e8f7f2;
+  color: #14352e;
+}
+
+.update-alert[hidden] {
+  display: none !important;
+}
+
+.update-alert__title {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.update-alert__text {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.update-alert__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.update-alert__button {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1f7f68;
+  color: #ffffff;
+  text-align: center;
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.update-alert__button:hover {
+  background: #176554;
+}
+
+.update-alert__dismiss {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #176554;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .status-card,
 .theme-card,
 .lang-card {
