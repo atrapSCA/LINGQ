@@ -277,6 +277,12 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.13
+8. 11. 2026 07:47
+- Stabilní user release: oprava podbarvení při načítání dalšího obsahu (Reddit infinite scroll).
+- MutationObserver už nezahazuje nové uzly při debounce; fronta se zpracuje i po doběhu obnovy.
+- Změna jen query/search (replaceState) nedělá full clear viditelných podbarvení.
+
 Verze 0.3.12
 8. 11. 2026 07:30
 - Stabilní user release: zapnutí doplňku po webech (allowlist), bez DB.
