@@ -277,6 +277,11 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.14
+8. 11. 2026 08:10
+- Stabilní user release: YouTube — nepodbarvovat UI tlačítka (Odpovědět) ani odkazy v „dalších videích“.
+- Přeskočení yt-simple-endpoint, kompaktních video karet, metadat (tis. zhlédnutí, kanál) a comment placeholderu.
+
 Verze 0.3.13
 8. 11. 2026 07:47
 - Stabilní user release: oprava podbarvení při načítání dalšího obsahu (Reddit infinite scroll).
