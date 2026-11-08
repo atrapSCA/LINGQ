@@ -18,7 +18,8 @@ const HIGHLIGHT_SKIP_TAGS = new Set([
   'HEAD', 'TITLE', 'META', 'LINK', 'BR', 'HR', 'IMG', 'PICTURE', 'SOURCE',
   'A',
 ]);
-let enabled = true;
+let siteEnabled = false;
+let enabledSites = [];
 let highlightEnabled = true;
 let clickCount = 2;
 let sourceLanguage = 'en';
@@ -71,8 +72,18 @@ function normalizePhraseSource(value) {
   return value === 'chatgpt' ? 'chatgpt' : 'lingq';
 }
 
+function recomputeSiteEnabled(sites) {
+  enabledSites = Array.isArray(sites) ? sites : [];
+  const host = typeof LingqSites !== 'undefined'
+    ? LingqSites.normalizeSiteHost(location.hostname)
+    : String(location.hostname || '').toLowerCase();
+  siteEnabled = typeof LingqSites !== 'undefined'
+    ? LingqSites.isHostEnabled(host, enabledSites)
+    : false;
+}
+
 chrome.storage.sync.get({
-  enabled: true,
+  enabledSites: [],
   highlightEnabled: true,
   clickCount: 2,
   language: 'en',
@@ -81,7 +92,7 @@ chrome.storage.sync.get({
   phraseTranslationSource: 'lingq',
   lingqEnabled: true,
 }, (settings) => {
-  enabled = settings.enabled !== false;
+  recomputeSiteEnabled(settings.enabledSites);
   highlightEnabled = settings.highlightEnabled !== false;
   clickCount = Number(settings.clickCount) === 2 ? 2 : 1;
   sourceLanguage = settings.language || 'en';
@@ -91,15 +102,60 @@ chrome.storage.sync.get({
     ? 'chatgpt'
     : normalizePhraseSource(settings.phraseTranslationSource);
   applyTooltipTheme();
+  refreshImportBannerFromStorage();
   schedulePageHighlight();
 });
 
+function ensureImportBannerEl() {
+  let el = document.getElementById('lingq-import-banner');
+  if (el?.isConnected) {
+    return el;
+  }
+  el = document.createElement('div');
+  el.id = 'lingq-import-banner';
+  el.setAttribute('role', 'status');
+  el.hidden = true;
+  el.textContent = '';
+  (document.documentElement || document.body).appendChild(el);
+  return el;
+}
+
+async function renderImportBanner(progress) {
+  const locked = isImportLockingHighlight(progress);
+  const el = ensureImportBannerEl();
+  if (!locked) {
+    el.hidden = true;
+    el.classList.remove('lingq-import-banner--visible');
+    return;
+  }
+  await ensureI18n();
+  el.textContent = t('content.importBanner');
+  el.hidden = false;
+  el.classList.add('lingq-import-banner--visible');
+}
+
+function refreshImportBannerFromStorage() {
+  chrome.storage.local.get('knownWordsSync', (stored) => {
+    renderImportBanner(stored.knownWordsSync || null).catch(() => {});
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.knownWordsSync) {
+    renderImportBanner(changes.knownWordsSync.newValue || null);
+    schedulePageHighlight({ force: true });
+    return;
+  }
   if (areaName !== 'sync') {
     return;
   }
-  if (changes.enabled) {
-    enabled = changes.enabled.newValue !== false;
+  if (changes.enabledSites) {
+    recomputeSiteEnabled(changes.enabledSites.newValue);
+    if (!siteEnabled) {
+      hideTooltip();
+      clearPageHighlights();
+      stopHighlightObserver();
+    }
     schedulePageHighlight({ force: true });
   }
   if (changes.highlightEnabled) {
@@ -120,7 +176,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     uiTheme = normalizeUiTheme(changes.theme.newValue);
     applyTooltipTheme();
   }
-  if (changes.supabaseEnabled || changes.supabaseUrl || changes.supabaseKey) {
+  if (changes.supabaseEnabled || changes.supabaseUrl) {
     schedulePageHighlight({ force: true });
   }
   if (changes.phraseTranslationSource || changes.lingqEnabled) {
@@ -152,7 +208,7 @@ document.addEventListener('click', (event) => {
 
 async function handlePhraseSelection(event) {
   // Syntetické eventy ze stránky (dispatchEvent) ignorujeme — běžné kliknutí uživatele projde.
-  if (!event.isTrusted || !enabled || event.button !== 0) {
+  if (!event.isTrusted || !siteEnabled || event.button !== 0) {
     return;
   }
 
@@ -214,7 +270,7 @@ function handleClick(event) {
     return;
   }
 
-  if (!enabled || event.button !== 0) {
+  if (!siteEnabled || event.button !== 0) {
     return;
   }
 
@@ -467,7 +523,7 @@ function getWordSelection(clientX, clientY, target) {
   const wordStart = findWordStart(text, offset);
   const wordEnd = findWordEnd(text, offset);
   const word = text.slice(wordStart, wordEnd).match(WORD_PATTERN)?.[0];
-  if (!word) {
+  if (!word || !hasLetter(word)) {
     return null;
   }
 
@@ -502,6 +558,11 @@ function findWordEnd(text, offset) {
 
 function isWordCharacter(character) {
   return /[\p{L}\p{M}\p{N}'’\-]/u.test(character);
+}
+
+/** Čísla bez písmen (60, 2024…) nepodbarvovat ani neotvírat bublinu. */
+function hasLetter(word) {
+  return /\p{L}/u.test(String(word || ''));
 }
 
 function showTooltip(word, rect, translation, kind, status, cardId, translations, viewCount = null, alternativesSource = 'lingq') {
@@ -1062,10 +1123,15 @@ function watchPageNavigation() {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'REFRESH_HIGHLIGHTS') {
+    refreshImportBannerFromStorage();
+    schedulePageHighlight({ force: Boolean(message.force) });
+    return;
+  }
   if (message?.type !== 'HIGHLIGHT_PAGE_CHANGED') {
     return;
   }
-  if (!enabled || !highlightEnabled) {
+  if (!siteEnabled || !highlightEnabled) {
     return;
   }
   const nextKey = pageLocationKey();
@@ -1080,7 +1146,7 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 async function refreshPageHighlight({ force = false, immediateBusy = false, settleRetries = null } = {}) {
-  if (!enabled || !highlightEnabled) {
+  if (!siteEnabled || !highlightEnabled) {
     hideHighlightBusy();
     clearPageHighlights();
     stopHighlightObserver();
@@ -1127,7 +1193,7 @@ async function refreshPageHighlight({ force = false, immediateBusy = false, sett
           });
         });
 
-        if (!enabled || !highlightEnabled) {
+        if (!siteEnabled || !highlightEnabled) {
           clearPageHighlights();
           stopHighlightObserver();
           highlightMap = Object.create(null);
@@ -1138,6 +1204,9 @@ async function refreshPageHighlight({ force = false, immediateBusy = false, sett
           clearPageHighlights();
           stopHighlightObserver();
           highlightMap = Object.create(null);
+          if (response?.blockedByImport) {
+            refreshImportBannerFromStorage();
+          }
           break;
         }
 
@@ -1631,6 +1700,9 @@ function wrapHighlightedWords(textNode) {
 
   while ((match = pattern.exec(text))) {
     const raw = match[0];
+    if (!hasLetter(raw)) {
+      continue;
+    }
     const entry = resolveHighlightEntry(raw);
     if (!entry.key && !entry.inDb) {
       continue;
@@ -1673,7 +1745,7 @@ function startHighlightObserver() {
     return;
   }
   highlightObserver = new MutationObserver((mutations) => {
-    if (highlightApplying || !enabled || !highlightEnabled || refreshPageHighlight.running) {
+    if (highlightApplying || !siteEnabled || !highlightEnabled || refreshPageHighlight.running) {
       return;
     }
     const roots = [];

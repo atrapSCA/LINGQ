@@ -38,6 +38,14 @@
           </div>
         </aside>
 
+        <aside class="import-alert" id="import-alert" hidden role="status">
+          <div class="import-alert__body">
+            <strong class="import-alert__title" data-i18n="import.alert.title">Probíhá import slovíček</strong>
+            <p class="import-alert__note" data-i18n="import.alert.highlightNote">Podbarvení slovíček je během importu vypnuté. Bez dokončeného importu by byla slovíčka podbarvená nesprávně (neúplná databáze).</p>
+            <p class="import-alert__eta" id="import-alert-eta" hidden></p>
+          </div>
+        </aside>
+
         <aside class="schema-alert" id="schema-alert" hidden role="alert">
           <div class="schema-alert__body">
             <strong class="schema-alert__title" data-i18n="schema.title">Aktualizujte databázi</strong>
@@ -105,6 +113,11 @@
               </label>
             </div>
             <p class="help" data-i18n="settings.highlightHelp">Po načtení stránky: neznámá (mimo DB) modře; 1 nejsilnější žlutá → 4 slabá žlutá; známá (K) a slovíčka v DB bez překladu bez barvy. Jen Supabase DB, ne LingQ API.</p>
+
+            <label class="field-label" data-i18n="settings.enabledSites">Povolené weby</label>
+            <p class="help" data-i18n="settings.enabledSitesHelp">Doplněk funguje jen na těchto doménách. Seznam spravujete i přepínačem v mini popupu na daném webu. Nevyžaduje databázi.</p>
+            <ul class="enabled-sites-list" id="enabled-sites-list"></ul>
+            <p class="help" id="enabled-sites-empty" data-i18n="settings.enabledSitesEmpty" hidden>Zatím žádný web. Otevřete stránku a v popupu doplněk zapněte.</p>
 
             <div id="translation-source-block" hidden>
               <label for="new-word-source" data-i18n="settings.newWordSource">Nová slovíčka překládat přes</label>
@@ -300,10 +313,11 @@
               <span>0</span>
               <span id="import-progress-total-label">0</span>
             </div>
+            <p class="import-progress__eta" id="import-progress-eta" hidden></p>
           </div>
-          <button type="button" class="import-button" id="sync-known-words" data-i18n="import.button">Importovat dalších 5 000</button>
+          <button type="button" class="import-button" id="sync-known-words" data-i18n="import.button">Spustit import (500 / 5 s)</button>
           <button type="button" class="import-button import-button--ghost" id="reset-lingq-import" data-i18n="import.reset">Resetovat progress importu</button>
-          <p class="help" data-i18n="import.help" data-i18n-html>Importuje Vocabulary karty i known words (obě množiny). Nejdřív karty (s překladem z hints), potom known words — i ta bez překladu se uloží a překlad zůstane prázdný. Kde už překlad z karty je, nepřepíše se. Dávky max 5 000, mezi nimi 1 h pauza. Jednou spusťte <code>supabase/import_known_words.sql</code>.</p>
+          <p class="help" data-i18n="import.help" data-i18n-html>Importuje Vocabulary karty i known words (obě množiny). Nejdřív karty (s překladem z hints), potom known words — i ta bez překladu se uloží a překlad zůstane prázdný. Kde už překlad z karty je, nepřepíše se. Běží automaticky: dávky po 500, mezi nimi 5 s pauza, dokud není celá DB stažená. Průběžně se zobrazuje odhad zbývající doby. Jednou spusťte <code>supabase/import_known_words.sql</code>.</p>
           <p class="words-import-status" id="import-known-status" role="status"></p>
         </div>
       </section>
@@ -422,6 +436,9 @@
     <script src="theme.js"></script>
     <script src="i18n.js"></script>
     <script src="role.js"></script>
+    <script src="sites.js"></script>
+    <script src="defaults.js"></script>
+    <script src="import-lock.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

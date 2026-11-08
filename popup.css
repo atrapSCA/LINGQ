@@ -70,6 +70,59 @@ h1 {
   display: none !important;
 }
 
+.import-alert {
+  display: block;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #c9a227;
+  border-radius: 10px;
+  background: #fff8e1;
+  color: #5c4a00;
+}
+
+.import-alert[hidden] {
+  display: none !important;
+}
+
+.import-alert__title {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.import-alert__note {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.import-alert__eta {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.import-alert__eta[hidden] {
+  display: none !important;
+}
+
+html[data-theme="dark"] .import-alert {
+  border-color: #a8841a;
+  background: #3a3010;
+  color: #ffe9a8;
+}
+
+.highlight-card.is-import-locked {
+  border-color: #c9a227;
+  background: #fff8e1;
+}
+
+html[data-theme="dark"] .highlight-card.is-import-locked {
+  border-color: #a8841a;
+  background: #3a3010;
+}
+
 .update-alert__title {
   display: block;
   font-size: 12px;

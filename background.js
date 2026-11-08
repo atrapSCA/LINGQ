@@ -1,4 +1,4 @@
-importScripts('role.js', 'i18n.js');
+importScripts('role.js', 'sites.js', 'defaults.js', 'i18n.js');
 
 async function ensureBgLocale() {
   if (typeof LingqI18n === 'undefined') {
@@ -18,45 +18,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-const DEFAULTS = {
-  apiKey: '',
-  language: 'en',
-  targetLanguage: 'cs',
-  enabled: true,
-  theme: 'light',
-  uiLocale: 'en',
-  clickCount: 2,
-  latencyIdleMinSeconds: 60,
-  latencyIdleMaxSeconds: 80,
-  chatgptApiKey: '',
-  chatgptApiKeyValid: false,
-  chatgptEnabled: true,
-  chatgptModel: 'gpt-5-nano',
-  alternativesSource: 'lingq',
-  newWordTranslationSource: 'lingq',
-  phraseTranslationSource: 'lingq',
-  lingqEnabled: true,
-  supabaseEnabled: true,
-  supabaseUrl: '',
-  supabaseKey: '',
-  highlightEnabled: true,
-};
-
-const CHATGPT_MODELS = {
-  'gpt-5-nano': { inputPerMillion: 0.05, outputPerMillion: 0.40 },
-  'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.60 },
-  'gpt-5.4-nano': { inputPerMillion: 0.20, outputPerMillion: 1.25 },
-  'gpt-5-mini': { inputPerMillion: 0.25, outputPerMillion: 2.00 },
-  'gpt-4.1-mini': { inputPerMillion: 0.40, outputPerMillion: 1.60 },
-};
-
-function resolveChatgptModel(settings) {
-  const model = String(settings?.chatgptModel || '').trim();
-  return Object.prototype.hasOwnProperty.call(CHATGPT_MODELS, model) ? model : DEFAULTS.chatgptModel;
-}
-
 const LATENCY_ALARM = 'lingq-latency-watch';
 const UPDATE_CHECK_ALARM = 'lingq-github-update-check';
+const IMPORT_CONTINUE_ALARM = 'importContinue';
 const GITHUB_REPO = 'atrapSCA/LINGQ';
 const GITHUB_TAGS_URL = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=20`;
 const UPDATE_CHECK_PERIOD_MINUTES = 6 * 60;
@@ -85,7 +49,6 @@ const EXTENSION_ONLY_MESSAGES = new Set([
   'GET_SUPABASE_STATUS',
   'COUNT_SUPABASE_WORDS',
   'LIST_SUPABASE_WORDS_FILTER',
-  'LIST_SUPABASE_WORDS',
   'LIST_SUPABASE_WORDS_PAGE',
   'CHECK_SUPABASE_SCHEMA',
   'PREPARE_SUPABASE_INSTALL',
@@ -207,8 +170,18 @@ function consumeRateLimit(type, sender) {
 }
 
 function gateUserAction(type, sender, sendResponse, run) {
-  chrome.storage.sync.get({ enabled: true }, (settings) => {
-    if (settings.enabled === false) {
+  chrome.storage.sync.get({ enabledSites: [] }, (settings) => {
+    const tabUrl = sender?.tab?.url || sender?.url || '';
+    const host = typeof LingqSites !== 'undefined'
+      ? LingqSites.siteKeyFromUrl(tabUrl)
+      : '';
+    // Požadavky z content scriptu musí být z povoleného webu; app/popup neblokovat.
+    const fromContent = Boolean(sender?.tab?.id);
+    if (fromContent && host && !LingqSites.isHostEnabled(host, settings.enabledSites)) {
+      sendResponse({ ok: false, error: bt('err.extensionOff') });
+      return;
+    }
+    if (fromContent && !host) {
       sendResponse({ ok: false, error: bt('err.extensionOff') });
       return;
     }
@@ -230,19 +203,42 @@ function iconPaths(enabled) {
   };
 }
 
-async function applyActionIcon(enabled) {
+async function applyActionIcon(enabled, { tabId } = {}) {
   const isEnabled = enabled !== false;
-  chrome.action.setIcon({ path: iconPaths(isEnabled) });
+  const paths = iconPaths(isEnabled);
+  if (Number.isInteger(tabId)) {
+    chrome.action.setIcon({ path: paths, tabId });
+  } else {
+    chrome.action.setIcon({ path: paths });
+  }
   await ensureBgLocale();
-  chrome.action.setTitle({
-    title: isEnabled ? bt('action.titleOn') : bt('action.titleOff'),
-  });
+  const title = isEnabled ? bt('action.titleOn') : bt('action.titleOff');
+  if (Number.isInteger(tabId)) {
+    chrome.action.setTitle({ title, tabId });
+  } else {
+    chrome.action.setTitle({ title });
+  }
 }
 
-function syncActionIcon() {
-  chrome.storage.sync.get(DEFAULTS, (settings) => {
-    applyActionIcon(settings.enabled).catch(() => {});
-  });
+async function syncActionIconForTab(tabId, url) {
+  const settings = await chrome.storage.sync.get({ enabledSites: [] });
+  const host = typeof LingqSites !== 'undefined' ? LingqSites.siteKeyFromUrl(url || '') : '';
+  const on = Boolean(host) && LingqSites.isHostEnabled(host, settings.enabledSites);
+  await applyActionIcon(on, { tabId });
+}
+
+async function syncActionIcon() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs[0];
+    if (tab?.id != null) {
+      await syncActionIconForTab(tab.id, tab.url || '');
+    } else {
+      await applyActionIcon(false);
+    }
+  } catch {
+    await applyActionIcon(false);
+  }
   getStoredUpdateStatus()
     .then((status) => applyUpdateBadge(status))
     .catch(() => {});
@@ -421,30 +417,58 @@ async function dismissUpdateNotice(version) {
   return saveUpdateStatus(status);
 }
 
+async function bootstrapExtensionStorage() {
+  await migrateSecretsAndLegacy();
+  syncActionIcon().catch(() => {});
+  ensureLatencyWatch();
+  ensureUpdateCheckSchedule();
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.sync.get(DEFAULTS, (settings) => {
-    chrome.storage.sync.set(settings);
-    applyActionIcon(settings.enabled).catch(() => {});
-    ensureLatencyWatch();
-    ensureUpdateCheckSchedule();
-    checkGithubUpdate({ force: true }).catch(() => {});
-  });
+  bootstrapExtensionStorage()
+    .then(() => checkGithubUpdate({ force: true }))
+    .catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  syncActionIcon();
-  ensureLatencyWatch();
-  ensureUpdateCheckSchedule();
-  checkGithubUpdate({ force: false }).catch(() => {});
+  bootstrapExtensionStorage()
+    .then(() => checkGithubUpdate({ force: false }))
+    .catch(() => {});
 });
+
+// Migrace i při wake service workeru (upgrade bez reinstall).
+migrateSecretsAndLegacy().catch(() => {});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  chrome.tabs.get(activeInfo.tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab) {
+      return;
+    }
+    syncActionIconForTab(tab.id, tab.url || '').catch(() => {});
+  });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url || changeInfo.status === 'complete') {
+    syncActionIconForTab(tabId, tab?.url || changeInfo.url || '').catch(() => {});
+  }
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.supabaseKey) {
+    invalidateSupabaseReadyCache();
+    invalidateHighlightMapCache();
+    ensureLatencyWatch({ reshuffle: true });
+    return;
+  }
   if (areaName !== 'sync') {
     return;
   }
-  if (changes.enabled) {
-    applyActionIcon(changes.enabled.newValue).catch(() => {});
+  if (changes.enabledSites) {
+    syncActionIcon().catch(() => {});
+    ensureLatencyWatch({ reshuffle: true });
   }
-  if (changes.supabaseUrl || changes.supabaseKey || changes.supabaseEnabled) {
+  if (changes.supabaseUrl || changes.supabaseEnabled) {
     invalidateSupabaseReadyCache();
     invalidateHighlightMapCache();
     ensureLatencyWatch({ reshuffle: true });
@@ -460,7 +484,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       syncDbToLingq().catch(() => {});
     }
   }
-  if (changes.latencyIdleMinSeconds || changes.latencyIdleMaxSeconds || changes.enabled) {
+  if (changes.latencyIdleMinSeconds || changes.latencyIdleMaxSeconds) {
     ensureLatencyWatch({ reshuffle: true });
   }
 });
@@ -470,6 +494,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === UPDATE_CHECK_ALARM) {
     checkGithubUpdate({ force: false }).catch(() => {});
+  }
+  if (alarm.name === IMPORT_CONTINUE_ALARM) {
+    resumeImportIfDue({ reason: 'alarm' }).catch(() => {});
   }
 });
 syncActionIcon();
@@ -688,14 +715,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (type === 'LIST_SUPABASE_WORDS') {
-    requireSupabaseReady()
-      .then(() => listSupabaseWords())
-      .then((words) => sendResponse({ ok: true, words }))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : bt('words.loadFailed') }));
-    return true;
-  }
-
   if (type === 'LIST_SUPABASE_WORDS_PAGE') {
     requireSupabaseReady()
       .then(() => listSupabaseWordsPage(message.offset, message.limit))
@@ -766,7 +785,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (type === 'SYNC_KNOWN_WORDS') {
     noteUserActivity();
     requireSupabaseReady()
-      .then(() => syncKnownWordsToSupabase())
+      .then(() => syncKnownWordsToSupabase({ auto: true }))
       .then((result) => reply(sendResponse, { ok: true, ...result }))
       .catch((error) => reply(sendResponse, {
         ok: false,
@@ -777,7 +796,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'GET_KNOWN_WORDS_SYNC_STATUS') {
     requireSupabaseReady()
-      .then(() => chrome.storage.sync.get(DEFAULTS))
+      .then(() => getExtensionSettings())
       .then((settings) => ensureImportProgress(settings, { forceRefreshTotals: Boolean(message.refreshTotals) }))
       .then((progress) => reply(sendResponse, { ok: true, progress }))
       .catch(async (error) => {
@@ -793,11 +812,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'RESET_LINGQ_IMPORT_PROGRESS') {
     requireSupabaseReady()
-      .then(() => chrome.storage.sync.get(DEFAULTS))
+      .then(() => getExtensionSettings())
       .then(async (settings) => {
+        await clearImportContinueAlarm();
         const fresh = enrichImportProgress(defaultImportProgress(settings.language || 'en'));
         await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: fresh });
         const progress = await ensureImportProgress(settings, { forceRefreshTotals: true });
+        notifyHighlightRefresh().catch(() => {});
         reply(sendResponse, { ok: true, progress });
       })
       .catch((error) => reply(sendResponse, {
@@ -849,7 +870,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function lookupWord(word, options = {}) {
   const probe = options.probe === true;
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   if (probe) {
     settings.language = PROBE_LANGUAGE;
   }
@@ -1089,7 +1110,7 @@ async function syncDbToLingq() {
     return lingqSyncState;
   }
   await ensureBgLocale();
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   if (!isLingqEnabled(settings)) {
     return lingqSyncState;
   }
@@ -1210,7 +1231,7 @@ async function attachMeanings(result) {
 }
 
 async function getAlternativeTranslations(word, currentTranslation) {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const cleanWord = normalizeWord(word);
   if (!cleanWord) {
     throw new Error(bt('err.missingWordAlts'));
@@ -1269,10 +1290,10 @@ async function ensureChatgptApiReady(settings) {
   }
   try {
     await validateChatgptApiKey(apiKey);
-    await chrome.storage.sync.set({ chatgptApiKeyValid: true });
+    await setExtensionSecrets({ chatgptApiKeyValid: true });
   } catch (error) {
-    await chrome.storage.sync.set({
-      chatgptApiKeyValid: false,
+    await setExtensionSecrets({ chatgptApiKeyValid: false });
+    await setExtensionPrefs({
       alternativesSource: 'lingq',
       newWordTranslationSource: 'lingq',
     });
@@ -1323,8 +1344,8 @@ async function callChatgptJson(settings, messages) {
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      await chrome.storage.sync.set({
-        chatgptApiKeyValid: false,
+      await setExtensionSecrets({ chatgptApiKeyValid: false });
+      await setExtensionPrefs({
         alternativesSource: 'lingq',
         newWordTranslationSource: 'lingq',
       });
@@ -1511,7 +1532,7 @@ async function ensureCardId(cardId, word, translation, settings) {
 }
 
 async function updateStatus(cardId, status, word, translation = '') {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   invalidateHighlightMapCache();
   const { apiStatus, body } = toApiStatus(status);
   if (!isLingqEnabled(settings)) {
@@ -1564,7 +1585,7 @@ async function updateStatus(cardId, status, word, translation = '') {
 }
 
 async function updateTranslation(cardId, word, translation) {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const text = String(translation || '').replace(/\s+/g, ' ').trim();
   if (!text) {
     throw new Error(bt('err.lingqEmptyTranslation'));
@@ -1669,7 +1690,7 @@ function wantsChatgptPhraseTranslation(settings) {
 }
 
 async function translatePhrase(text) {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) {
     throw new Error(bt('err.selectPhrase'));
@@ -1852,8 +1873,9 @@ const KNOWN_WORDS_MAX_PAGES = 200;
 const KNOWN_WORDS_PAGE_SIZE = 1000;
 const IMPORT_KNOWN_BATCH_SIZE = 500;
 const CARDS_IMPORT_PAGE_SIZE = 100;
-const IMPORT_BATCH_SIZE = 5000;
-const IMPORT_COOLDOWN_MS = 60 * 60 * 1000;
+/** Jedna dávka z LingQ → DB, pak pauza, pak další — dokud není hotovo. */
+const IMPORT_BATCH_SIZE = 500;
+const IMPORT_COOLDOWN_MS = 5 * 1000;
 const IMPORT_PAGE_DELAY_MS = 400;
 const KNOWN_WORDS_SYNC_KEY = 'knownWordsSync';
 let knownWordsSyncRunning = false;
@@ -2082,6 +2104,7 @@ function defaultImportProgress(language) {
     knownNextUrl: null,
     batchSize: IMPORT_BATCH_SIZE,
     cooldownMs: IMPORT_COOLDOWN_MS,
+    autoContinue: false,
     lastBatchAt: null,
     cooldownUntil: null,
     running: false,
@@ -2094,6 +2117,42 @@ function defaultImportProgress(language) {
     message: '',
   };
 }
+
+async function clearImportContinueAlarm() {
+  await chrome.alarms.clear(IMPORT_CONTINUE_ALARM);
+}
+
+async function scheduleImportContinue(whenMs) {
+  const delayMs = Math.max(Number(whenMs) - Date.now(), 1_000);
+  // chrome.alarms: delayInMinutes; u unpacked funguje i < 1 min
+  await chrome.alarms.create(IMPORT_CONTINUE_ALARM, {
+    delayInMinutes: Math.max(delayMs / 60_000, 0.05),
+  });
+}
+
+async function resumeImportIfDue({ reason } = {}) {
+  if (knownWordsSyncRunning) {
+    return null;
+  }
+  const progress = await readImportProgress();
+  if (!progress || !progress.autoContinue || progress.phase === 'done') {
+    return null;
+  }
+  const remaining = Number(progress.cooldownUntil) - Date.now();
+  if (remaining > 1_000) {
+    await scheduleImportContinue(progress.cooldownUntil);
+    return progress;
+  }
+  try {
+    await requireSupabaseReady();
+    return await syncKnownWordsToSupabase({ auto: true, reason });
+  } catch {
+    await scheduleImportContinue(Date.now() + IMPORT_COOLDOWN_MS);
+    return null;
+  }
+}
+
+resumeImportIfDue({ reason: 'startup' }).catch(() => {});
 
 function enrichImportProgress(progress) {
   const now = Date.now();
@@ -2176,12 +2235,9 @@ async function ensureImportProgress(settings, { forceRefreshTotals = false } = {
     }
   }
 
-  if (!progress.batchSize) {
-    progress.batchSize = IMPORT_BATCH_SIZE;
-  }
-  if (!progress.cooldownMs) {
-    progress.cooldownMs = IMPORT_COOLDOWN_MS;
-  }
+  // Vždy aktuální tempo (500 / 5 s) — i když ve storage zbyla stará 5 000 / 1 h.
+  progress.batchSize = IMPORT_BATCH_SIZE;
+  progress.cooldownMs = IMPORT_COOLDOWN_MS;
 
   const saved = enrichImportProgress(progress);
   await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: saved });
@@ -2403,13 +2459,13 @@ async function uploadVocabularyItems(settings, items, { onProgress } = {}) {
   return { uploaded, inserted, updated };
 }
 
-async function syncKnownWordsToSupabase() {
+async function syncKnownWordsToSupabase({ auto = false } = {}) {
   if (knownWordsSyncRunning) {
     throw new Error(bt('import.err.busy'));
   }
 
   knownWordsSyncRunning = true;
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   try {
     if (!settings.apiKey) {
       throw new Error(bt('err.needLingqKey'));
@@ -2420,10 +2476,12 @@ async function syncKnownWordsToSupabase() {
       throw new Error(bt('import.err.needSupabase'));
     }
 
-    let progress = await ensureImportProgress(settings, { forceRefreshTotals: true });
+    let progress = await ensureImportProgress(settings, { forceRefreshTotals: !auto });
     if (progress.phase === 'done') {
+      await clearImportContinueAlarm();
       return enrichImportProgress({
         ...progress,
+        autoContinue: false,
         messageKey: 'import.msg.alreadyDone',
         messageParams: {},
         message: bt('import.msg.alreadyDone'),
@@ -2432,12 +2490,29 @@ async function syncKnownWordsToSupabase() {
 
     const remaining = Number(progress.cooldownUntil) - Date.now();
     if (remaining > 0) {
-      const minutes = Math.ceil(remaining / 60000);
-      throw new Error(bt('import.err.cooldown', { minutes }));
+      if ((auto || progress.autoContinue) && remaining <= IMPORT_COOLDOWN_MS + 5_000) {
+        await sleep(remaining);
+      } else if (auto || progress.autoContinue) {
+        await scheduleImportContinue(progress.cooldownUntil);
+        const waiting = enrichImportProgress({
+          ...progress,
+          autoContinue: true,
+          running: false,
+          messageKey: 'import.msg.autoWaiting',
+          messageParams: {},
+          message: bt('import.msg.autoWaiting'),
+        });
+        await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: waiting });
+        return waiting;
+      } else {
+        const seconds = Math.max(1, Math.ceil(remaining / 1000));
+        throw new Error(bt('import.err.cooldown', { seconds }));
+      }
     }
 
     progress = enrichImportProgress({
       ...progress,
+      autoContinue: true,
       running: true,
       error: null,
       messageKey: progress.phase === 'known'
@@ -2449,6 +2524,7 @@ async function syncKnownWordsToSupabase() {
         : bt('import.msg.fetchingCards'),
     });
     await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: progress });
+    notifyHighlightRefresh().catch(() => {});
 
     let batchResult;
     try {
@@ -2488,9 +2564,10 @@ async function syncKnownWordsToSupabase() {
     } catch (error) {
       if (error?.code === 'RATE_LIMIT' && error.partial?.items?.length) {
         const upload = await uploadVocabularyItems(settings, error.partial.items);
-        const cooldownUntil = Date.now() + (progress.cooldownMs || IMPORT_COOLDOWN_MS);
+        const cooldownUntil = Date.now() + IMPORT_COOLDOWN_MS;
         const next = enrichImportProgress({
           ...progress,
+          autoContinue: true,
           running: false,
           importedCards: progress.phase === 'cards'
             ? (Number(progress.importedCards) || 0) + (error.partial.fetchedCards || error.partial.fetched || 0)
@@ -2515,6 +2592,7 @@ async function syncKnownWordsToSupabase() {
           message: error.message,
         });
         await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: next });
+        await scheduleImportContinue(cooldownUntil);
         throw error;
       }
       throw error;
@@ -2594,11 +2672,15 @@ async function syncKnownWordsToSupabase() {
       }
     }
 
+    const done = nextPhase === 'done';
     const result = enrichImportProgress({
       ...progress,
+      autoContinue: !done,
       running: false,
       lastBatchAt: Date.now(),
-      cooldownUntil: nextPhase === 'done' ? null : cooldownUntil,
+      cooldownUntil: done ? null : cooldownUntil,
+      cooldownMs: IMPORT_COOLDOWN_MS,
+      batchSize: IMPORT_BATCH_SIZE,
       insertedTotal: (Number(progress.insertedTotal) || 0) + upload.inserted,
       updatedTotal: (Number(progress.updatedTotal) || 0) + upload.updated,
       lastBatchInserted: upload.inserted,
@@ -2610,16 +2692,29 @@ async function syncKnownWordsToSupabase() {
       message,
     });
     await chrome.storage.local.set({ [KNOWN_WORDS_SYNC_KEY]: result });
-    return result;
+    if (done) {
+      await clearImportContinueAlarm();
+      notifyHighlightRefresh().catch(() => {});
+      return result;
+    }
+    // Alarm jako záloha; přesných 5 s drží sleep ve stejném běhu (alarm často min. ~1 min).
+    await scheduleImportContinue(cooldownUntil);
+    knownWordsSyncRunning = false;
+    await sleep(IMPORT_COOLDOWN_MS);
+    return syncKnownWordsToSupabase({ auto: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : bt('import.err.failed');
     const current = await readImportProgress();
+    const keepAuto = Boolean(current?.autoContinue) || auto;
     await setKnownWordsSyncProgress({
       ...(current || {}),
       running: false,
       error: message,
       message,
     });
+    if (keepAuto && current?.phase !== 'done') {
+      await scheduleImportContinue(Date.now() + IMPORT_COOLDOWN_MS);
+    }
     throw error;
   } finally {
     knownWordsSyncRunning = false;
@@ -2982,7 +3077,7 @@ function rememberSupabaseReady(ready, override = null, message = '', messageKey 
 
 async function getSupabaseGate({ force = false } = {}) {
   await ensureBgLocale();
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   if (!isSupabaseEnabled(settings)) {
     invalidateSupabaseReadyCache();
     return {
@@ -3089,7 +3184,7 @@ async function requireSupabaseReady() {
 
 async function resolveSupabaseSettings(override = null) {
   await ensureBgLocale();
-  const stored = await chrome.storage.sync.get(DEFAULTS);
+  const stored = await getExtensionSettings();
   const baseUrl = String(override?.supabaseUrl || stored.supabaseUrl || '').trim().replace(/\/$/, '');
   const apiKey = String(override?.supabaseKey || stored.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
@@ -3331,7 +3426,7 @@ function escapePostgrestFilterValue(value) {
 }
 
 async function getSupabaseWordsClient() {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
@@ -3348,15 +3443,55 @@ async function getSupabaseWordsClient() {
 /** V mapě podbarvení: 6 = v DB bez překladu → nepodbarvovat (stejně jako K). */
 const HIGHLIGHT_SKIP_NO_TRANSLATION = 6;
 
+async function isImportBlockingHighlight() {
+  const progress = await readImportProgress();
+  if (!progress || progress.phase === 'done') {
+    return false;
+  }
+  return Boolean(progress.autoContinue)
+    || Boolean(progress.running)
+    || (Number(progress.importedCards) || 0) > 0
+    || (Number(progress.knownImported) || 0) > 0
+    || (Number(progress.cooldownUntil) || 0) > Date.now();
+}
+
+async function notifyHighlightRefresh() {
+  invalidateHighlightMapCache();
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(tabs.map((tab) => new Promise((resolve) => {
+      if (tab.id == null) {
+        resolve();
+        return;
+      }
+      chrome.tabs.sendMessage(tab.id, { type: 'REFRESH_HIGHLIGHTS', force: true }, () => {
+        void chrome.runtime.lastError;
+        resolve();
+      });
+    })));
+  } catch {
+    // Žádné otevřené taby / content script.
+  }
+}
+
 /**
  * Mapa slovíček pro podbarvení stránky — jen Supabase.
  * 1–4 = žlutá, 5 = K bez barvy, 6 = v DB bez překladu bez barvy, chybějící klíč = neznámé (modrá).
  */
 async function getHighlightWordMap({ force = false } = {}) {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const language = settings.language || 'en';
   if (settings.highlightEnabled === false) {
     return { words: {}, language, enabled: false, ready: false };
+  }
+  if (await isImportBlockingHighlight()) {
+    return {
+      words: {},
+      language,
+      enabled: false,
+      ready: false,
+      blockedByImport: true,
+    };
   }
   if (!isSupabaseConfigured(settings)) {
     return { words: {}, language, enabled: true, ready: false };
@@ -3637,24 +3772,8 @@ async function listSupabaseWordsPage(offset = 0, limit = WORDS_PAGE_SIZE) {
   };
 }
 
-async function listSupabaseWords() {
-  const list = [];
-  let offset = 0;
-  let guard = 0;
-  while (guard < 400) {
-    guard += 1;
-    const page = await listSupabaseWordsPage(offset, WORDS_PAGE_SIZE);
-    list.push(...page.words);
-    if (page.done) {
-      break;
-    }
-    offset = page.nextOffset;
-  }
-  return list;
-}
-
 async function deleteWordEverywhere(word, cardId = null) {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   invalidateHighlightMapCache();
   const original = String(word || '').trim();
   const text = normalizeWord(original);
@@ -3813,7 +3932,7 @@ function getStatsPeriodRange(period) {
 }
 
 async function getUsageStats(period = '30d') {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
@@ -3850,7 +3969,7 @@ async function getUsageStats(period = '30d') {
 }
 
 async function getLatencyStats() {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
+  const settings = await getExtensionSettings();
   const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
   const apiKey = String(settings.supabaseKey || '').trim();
   if (!baseUrl || !apiKey) {
@@ -3908,8 +4027,9 @@ async function ensureLatencyWatch(options = {}) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
-  const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
+  const settings = await getExtensionSettings({ latencyIdleSeconds: 60 });
+  const hasSites = Array.isArray(settings.enabledSites) && settings.enabledSites.length > 0;
+  if (!hasSites || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -3931,8 +4051,9 @@ async function scheduleNextProbe({ fromNow = true } = {}) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
-  const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
+  const settings = await getExtensionSettings({ latencyIdleSeconds: 60 });
+  const hasSites = Array.isArray(settings.enabledSites) && settings.enabledSites.length > 0;
+  if (!hasSites || !isLingqEnabled(settings) || !isSupabaseConfigured(settings)) {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
@@ -3961,8 +4082,9 @@ async function onLatencyAlarm() {
     await chrome.alarms.clear(LATENCY_ALARM);
     return;
   }
-  const settings = await chrome.storage.sync.get({ ...DEFAULTS, latencyIdleSeconds: 60 });
-  if (settings.enabled === false || !isSupabaseConfigured(settings)) {
+  const settings = await getExtensionSettings({ latencyIdleSeconds: 60 });
+  const hasSites = Array.isArray(settings.enabledSites) && settings.enabledSites.length > 0;
+  if (!hasSites || !isSupabaseConfigured(settings)) {
     return;
   }
   const gate = await getSupabaseGate().catch(() => ({ ready: false }));
@@ -4011,7 +4133,7 @@ async function probeLingq() {
 
 async function pickProbeWordFromDatabase() {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULTS);
+    const settings = await getExtensionSettings();
     const baseUrl = String(settings.supabaseUrl || '').replace(/\/$/, '');
     const apiKey = String(settings.supabaseKey || '').trim();
     if (!baseUrl || !apiKey) {
@@ -4099,7 +4221,7 @@ function latencyWordStatus(result) {
 
 async function recordLatency(sample) {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULTS);
+    const settings = await getExtensionSettings();
     if (!isSupabaseConfigured(settings)) {
       return;
     }
@@ -4138,7 +4260,7 @@ async function recordLatency(sample) {
 
 async function logUsageEvent(eventType, fields = {}) {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULTS);
+    const settings = await getExtensionSettings();
     if (!isSupabaseConfigured(settings)) {
       return;
     }

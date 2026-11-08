@@ -1,43 +1,3 @@
-const DEFAULTS = {
-  apiKey: '',
-  language: 'en',
-  targetLanguage: 'cs',
-  enabled: true,
-  theme: 'light',
-  uiLocale: 'en',
-  clickCount: 2,
-  latencyIdleMinSeconds: 60,
-  latencyIdleMaxSeconds: 80,
-  chatgptApiKey: '',
-  chatgptApiKeyValid: false,
-  chatgptEnabled: true,
-  chatgptModel: 'gpt-5-nano',
-  alternativesSource: 'lingq',
-  newWordTranslationSource: 'lingq',
-  phraseTranslationSource: 'lingq',
-  lingqEnabled: true,
-  supabaseEnabled: true,
-  supabaseUrl: '',
-  supabaseKey: '',
-  highlightEnabled: true,
-};
-
-const CHATGPT_MODEL_PRICES = {
-  'gpt-5-nano': { input: '0.05', output: '0.40' },
-  'gpt-4o-mini': { input: '0.15', output: '0.60' },
-  'gpt-5.4-nano': { input: '0.20', output: '1.25' },
-  'gpt-5-mini': { input: '0.25', output: '2.00' },
-  'gpt-4.1-mini': { input: '0.40', output: '1.60' },
-};
-
-const CHATGPT_MODEL_IDS = [
-  'gpt-5-nano',
-  'gpt-4o-mini',
-  'gpt-5.4-nano',
-  'gpt-5-mini',
-  'gpt-4.1-mini',
-];
-
 const form = document.getElementById('settings-form');
 const lingqEnabledInput = document.getElementById('lingq-enabled');
 const lingqSettingsBlock = document.getElementById('lingq-settings-block');
@@ -71,6 +31,11 @@ const supabaseUrlInput = document.getElementById('supabase-url');
 const supabaseKeyInput = document.getElementById('supabase-key');
 const clickCountInput = document.getElementById('click-count');
 const highlightEnabledInput = document.getElementById('highlight-enabled');
+const enabledSitesList = document.getElementById('enabled-sites-list');
+const enabledSitesEmpty = document.getElementById('enabled-sites-empty');
+let enabledSites = [];
+const importAlert = document.getElementById('import-alert');
+let importLocksHighlight = false;
 const latencyIdleMinInput = document.getElementById('latency-idle-min');
 const latencyIdleMaxInput = document.getElementById('latency-idle-max');
 const adminIdleSettings = document.getElementById('admin-idle-settings');
@@ -118,6 +83,10 @@ const importProgressNumbers = document.getElementById('import-progress-numbers')
 const importProgressFill = document.getElementById('import-progress-fill');
 const importProgressBar = document.getElementById('import-progress-bar');
 const importProgressTotalLabel = document.getElementById('import-progress-total-label');
+const importProgressEta = document.getElementById('import-progress-eta');
+const importAlertEta = document.getElementById('import-alert-eta');
+/** Odhad práce na dávku (stažení + upload) nad rámec pauzy. */
+const IMPORT_BATCH_WORK_MS = 12_000;
 const importCardsNumbers = document.getElementById('import-cards-numbers');
 const importKnownNumbers = document.getElementById('import-known-numbers');
 let importCooldownTimer = null;
@@ -184,6 +153,7 @@ function applyUiLocale() {
   });
   refreshSupabaseGate({ force: false });
   renderUpdateAlert(latestUpdateStatus);
+  renderEnabledSites();
   // Obnovit kalendář / tabulky s novým jazykem, pokud už jsou načtené.
   if (statsHeatmap?.dataset.loaded) {
     loadStats(true);
@@ -237,11 +207,75 @@ function applyBuildRoleUi() {
   document.body.classList.toggle('is-user-build', !admin);
 }
 
+function renderImportHighlightAlert(progress) {
+  importLocksHighlight = isImportLockingHighlight(progress);
+  if (importAlert) {
+    importAlert.hidden = !importLocksHighlight;
+  }
+  if (importAlertEta) {
+    const etaText = importLocksHighlight ? formatImportEtaText(progress) : '';
+    importAlertEta.hidden = !etaText;
+    importAlertEta.textContent = etaText;
+  }
+  if (highlightEnabledInput) {
+    highlightEnabledInput.disabled = importLocksHighlight || highlightEnabledInput.disabled;
+    if (importLocksHighlight) {
+      highlightEnabledInput.checked = false;
+    }
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.knownWordsSync) {
-    renderKnownWordsSyncProgress(changes.knownWordsSync.newValue || null);
+    const progress = changes.knownWordsSync.newValue || null;
+    renderKnownWordsSyncProgress(progress);
+    renderImportHighlightAlert(progress);
+  }
+  if (areaName === 'sync' && changes.enabledSites) {
+    enabledSites = Array.isArray(changes.enabledSites.newValue) ? changes.enabledSites.newValue : [];
+    renderEnabledSites();
   }
 });
+
+function normalizeEnabledSites(list) {
+  if (typeof LingqSites !== 'undefined') {
+    return (Array.isArray(list) ? list : [])
+      .map((site) => LingqSites.normalizeSiteHost(site))
+      .filter(Boolean)
+      .sort();
+  }
+  return Array.isArray(list) ? [...list].filter(Boolean).sort() : [];
+}
+
+function renderEnabledSites() {
+  if (!enabledSitesList || !enabledSitesEmpty) {
+    return;
+  }
+  const sites = normalizeEnabledSites(enabledSites);
+  enabledSitesList.replaceChildren();
+  enabledSitesEmpty.hidden = sites.length > 0;
+  sites.forEach((site) => {
+    const item = document.createElement('li');
+    item.className = 'enabled-sites-list__item';
+    const host = document.createElement('span');
+    host.className = 'enabled-sites-list__host';
+    host.textContent = site;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'enabled-sites-list__remove';
+    remove.textContent = t('settings.enabledSitesRemove');
+    remove.addEventListener('click', () => {
+      enabledSites = typeof LingqSites !== 'undefined'
+        ? LingqSites.removeEnabledSite(enabledSites, site)
+        : enabledSites.filter((entry) => entry !== site);
+      chrome.storage.sync.set({ enabledSites }, () => {
+        renderEnabledSites();
+      });
+    });
+    item.append(host, remove);
+    enabledSitesList.append(item);
+  });
+}
 
 syncKnownWordsButton.addEventListener('click', () => {
   startKnownWordsSync();
@@ -263,7 +297,7 @@ resetLingqImportButton.addEventListener('click', () => {
   });
 });
 
-chrome.storage.sync.get(DEFAULTS, (settings) => {
+getExtensionSettings().then((settings) => {
   apiKeyInput.value = settings.apiKey;
   lingqEnabledInput.checked = settings.lingqEnabled !== false;
   chatgptEnabledInput.checked = settings.chatgptEnabled !== false;
@@ -279,6 +313,8 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
   if (highlightEnabledInput) {
     highlightEnabledInput.checked = settings.highlightEnabled !== false;
   }
+  enabledSites = normalizeEnabledSites(settings.enabledSites);
+  renderEnabledSites();
   const idleRange = normalizeIdleRange(settings);
   latencyIdleMinInput.value = String(idleRange.min);
   latencyIdleMaxInput.value = String(idleRange.max);
@@ -331,12 +367,9 @@ form.addEventListener('submit', async (event) => {
   applyOptionalFeatureUi();
   updateLingqAvailability();
   updateChatgptDependentAvailability({ alternativesSource, newWordTranslationSource, phraseTranslationSource });
-  chrome.storage.sync.set({
-    apiKey: apiKeyInput.value.trim(),
+  const prefs = {
     lingqEnabled,
     chatgptEnabled,
-    chatgptApiKey,
-    chatgptApiKeyValid: valid,
     chatgptModel: resolveChatgptModel(chatgptModelInput.value),
     alternativesSource,
     newWordTranslationSource,
@@ -346,9 +379,18 @@ form.addEventListener('submit', async (event) => {
     highlightEnabled: highlightEnabledInput ? highlightEnabledInput.checked : true,
     supabaseEnabled,
     supabaseUrl: supabaseUrlInput.value.trim().replace(/\/$/, ''),
-    supabaseKey: supabaseKeyInput.value.trim(),
     ...readIdleRange(),
-  }, () => {
+  };
+  const secrets = {
+    apiKey: apiKeyInput.value.trim(),
+    chatgptApiKey,
+    chatgptApiKeyValid: valid,
+    supabaseKey: supabaseKeyInput.value.trim(),
+  };
+  Promise.all([
+    setExtensionPrefs(prefs),
+    setExtensionSecrets(secrets),
+  ]).then(() => {
     const idleRange = readIdleRange();
     latencyIdleMinInput.value = String(idleRange.latencyIdleMinSeconds);
     latencyIdleMaxInput.value = String(idleRange.latencyIdleMaxSeconds);
@@ -514,7 +556,7 @@ clickCountInput.addEventListener('change', () => {
 });
 
 highlightEnabledInput?.addEventListener('change', () => {
-  if (highlightEnabledInput.disabled || !supabaseReady) {
+  if (highlightEnabledInput.disabled || !supabaseReady || importLocksHighlight) {
     highlightEnabledInput.checked = false;
     return;
   }
@@ -577,28 +619,28 @@ chatgptModelInput.addEventListener('change', () => {
 
 chatgptApiKeyInput.addEventListener('change', () => {
   validateChatgptApiKey(chatgptApiKeyInput.value.trim()).then((valid) => {
+    chatgptApiKeyValid = valid;
     const alternativesSource = valid && alternativesSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
     const newWordTranslationSource = valid && newWordSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
     const phraseTranslationSource = valid && phraseSourceInput.value === 'chatgpt' ? 'chatgpt' : 'lingq';
-    chrome.storage.sync.set({
-      chatgptApiKey: chatgptApiKeyInput.value.trim(),
-      chatgptApiKeyValid: valid,
-      chatgptModel: resolveChatgptModel(chatgptModelInput.value),
-      alternativesSource,
-      newWordTranslationSource,
-      phraseTranslationSource,
-    });
+    Promise.all([
+      setExtensionSecrets({
+        chatgptApiKey: chatgptApiKeyInput.value.trim(),
+        chatgptApiKeyValid: valid,
+      }),
+      setExtensionPrefs({
+        chatgptModel: resolveChatgptModel(chatgptModelInput.value),
+        alternativesSource,
+        newWordTranslationSource,
+        phraseTranslationSource,
+      }),
+    ]);
   });
 });
 
 function setChatgptKeyStatus(message, tone = '') {
   chatgptKeyStatus.textContent = message;
   chatgptKeyStatus.dataset.tone = tone;
-}
-
-function resolveChatgptModel(model) {
-  const value = String(model || '').trim();
-  return CHATGPT_MODEL_IDS.includes(value) ? value : DEFAULTS.chatgptModel;
 }
 
 function applyOptionalFeatureUi() {
@@ -1021,15 +1063,17 @@ function applyDbGateUi() {
     resetLingqImportButton.disabled = !supabaseReady;
   }
   if (highlightEnabledInput) {
-    highlightEnabledInput.disabled = !supabaseReady;
+    highlightEnabledInput.disabled = !supabaseReady || importLocksHighlight;
     const highlightHeader = highlightEnabledInput.closest('.settings-section__header');
-    highlightHeader?.classList.toggle('is-disabled', !supabaseReady);
-    if (!supabaseReady) {
+    highlightHeader?.classList.toggle('is-disabled', !supabaseReady || importLocksHighlight);
+    if (!supabaseReady || importLocksHighlight) {
       highlightEnabledInput.checked = false;
     } else {
       // Po opětovném připojení DB obnov preferenci ze storage.
       chrome.storage.sync.get({ highlightEnabled: true }, (settings) => {
-        highlightEnabledInput.checked = settings.highlightEnabled !== false;
+        if (!importLocksHighlight) {
+          highlightEnabledInput.checked = settings.highlightEnabled !== false;
+        }
       });
     }
   }
@@ -1454,9 +1498,10 @@ function readSupabaseFormSettings() {
 
 function persistSupabaseFormSettings() {
   const settings = readSupabaseFormSettings();
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(settings, () => resolve(settings));
-  });
+  return Promise.all([
+    setExtensionPrefs({ supabaseUrl: settings.supabaseUrl }),
+    setExtensionSecrets({ supabaseKey: settings.supabaseKey }),
+  ]).then(() => settings);
 }
 
 async function runSupabaseDbCheck() {
@@ -1600,6 +1645,71 @@ function formatCooldown(ms) {
   return `${seconds} s`;
 }
 
+function importBatchesNeeded(count, batchSize) {
+  const n = Math.max(0, Number(count) || 0);
+  const size = Math.max(1, Number(batchSize) || 500);
+  if (n <= 0) {
+    return 0;
+  }
+  return Math.ceil(n / size);
+}
+
+/** Odhad zbývající doby: zbývající dávky × (pauza + práce) + aktuální cooldown. */
+function estimateImportRemainingMs(progress) {
+  if (!progress || progress.phase === 'done') {
+    return 0;
+  }
+  const batchSize = Math.max(1, Number(progress.batchSize) || 500);
+  const cooldownMs = Math.max(0, Number(progress.cooldownMs) || 5_000);
+  const workMs = Math.max(
+    IMPORT_BATCH_WORK_MS,
+    Number(progress.lastBatchDurationMs) || 0,
+  );
+  const perBatchMs = cooldownMs + workMs;
+
+  const cardsLeft = Math.max(0, (Number(progress.totalCards) || 0) - (Number(progress.importedCards) || 0));
+  const knownLeft = Math.max(0, (Number(progress.knownTotal) || 0) - (Number(progress.knownImported) || 0));
+
+  let batches = 0;
+  if (progress.phase === 'cards') {
+    batches = importBatchesNeeded(cardsLeft, batchSize)
+      + importBatchesNeeded(Number(progress.knownTotal) || 0, batchSize);
+  } else if (progress.phase === 'known') {
+    batches = importBatchesNeeded(knownLeft, batchSize);
+  } else {
+    batches = importBatchesNeeded(cardsLeft + knownLeft, batchSize);
+  }
+
+  // Probíhající dávka: už nepočítat plnou pauzu navíc, jen zbývající cooldown.
+  if (progress.running && batches > 0) {
+    batches -= 1;
+  }
+
+  const cooldownLeft = Math.max(0, Number(progress.cooldownRemainingMs)
+    || (Number(progress.cooldownUntil) || 0) - Date.now());
+  return Math.max(0, batches * perBatchMs + cooldownLeft);
+}
+
+function formatImportEtaText(progress) {
+  const ms = estimateImportRemainingMs(progress);
+  if (!progress || progress.phase === 'done') {
+    return '';
+  }
+  if (ms <= 0 && !progress.running) {
+    const batchSize = Math.max(1, Number(progress.batchSize) || 500);
+    const cooldownMs = Math.max(0, Number(progress.cooldownMs) || 5_000);
+    const cards = Number(progress.totalCards) || 0;
+    const known = Number(progress.knownTotal) || 0;
+    const totalBatches = importBatchesNeeded(cards, batchSize) + importBatchesNeeded(known, batchSize);
+    if (totalBatches <= 0) {
+      return '';
+    }
+    const totalMs = totalBatches * (cooldownMs + IMPORT_BATCH_WORK_MS);
+    return t('import.eta.total', { time: formatCooldown(totalMs) });
+  }
+  return t('import.eta.remaining', { time: formatCooldown(Math.max(ms, 1_000)) });
+}
+
 function clearImportCooldownTimer() {
   if (importCooldownTimer) {
     window.clearInterval(importCooldownTimer);
@@ -1610,6 +1720,10 @@ function clearImportCooldownTimer() {
 function updateImportProgressUi(progress) {
   if (!progress) {
     importProgress.hidden = true;
+    if (importProgressEta) {
+      importProgressEta.hidden = true;
+      importProgressEta.textContent = '';
+    }
     return;
   }
   importProgress.hidden = false;
@@ -1631,6 +1745,12 @@ function updateImportProgressUi(progress) {
   importProgressTotalLabel.textContent = formatKnownCount(total);
   importProgressFill.style.width = `${percent}%`;
   importProgressBar.setAttribute('aria-valuenow', String(percent));
+
+  if (importProgressEta) {
+    const etaText = progress.phase === 'done' ? '' : formatImportEtaText(progress);
+    importProgressEta.hidden = !etaText;
+    importProgressEta.textContent = etaText;
+  }
 }
 
 function resolveImportStatusText(progress) {
@@ -1676,6 +1796,7 @@ function resolveImportStatusText(progress) {
 
 function renderKnownWordsSyncProgress(progress) {
   clearImportCooldownTimer();
+  renderImportHighlightAlert(progress);
   if (!progress) {
     syncKnownWordsButton.disabled = false;
     syncKnownWordsButton.textContent = t('import.button');
@@ -1711,11 +1832,17 @@ function renderKnownWordsSyncProgress(progress) {
         restoreKnownWordsSyncStatus();
         return;
       }
+      const live = {
+        ...progress,
+        cooldownRemainingMs: left,
+      };
       syncKnownWordsButton.textContent = t('import.nextIn', { time: formatCooldown(left) });
       setKnownWordsStatus(
-        `${resolveImportStatusText(progress)} ${t('import.msg.cooldownHint')}`,
+        `${resolveImportStatusText(progress)} ${t('import.msg.cooldownHint')} ${formatImportEtaText(live)}`,
         'ok',
       );
+      updateImportProgressUi(live);
+      renderImportHighlightAlert(live);
     };
     tick();
     importCooldownTimer = window.setInterval(tick, 1000);
@@ -1723,7 +1850,7 @@ function renderKnownWordsSyncProgress(progress) {
   }
 
   syncKnownWordsButton.disabled = false;
-  const batch = Number(progress.batchSize) || 5000;
+  const batch = Number(progress.batchSize) || 500;
   syncKnownWordsButton.textContent = t('import.buttonN', { n: formatKnownCount(batch) });
   if (progress.error) {
     setKnownWordsStatus(progress.error, 'error');
@@ -1878,7 +2005,7 @@ function loadWords(force) {
     if (chrome.runtime.lastError || !response?.ok) {
       wordsIndexReady = false;
       wordsMeta.textContent = '';
-      wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('words.loadFailed')}</div>`;
+      setEmptyMessage(wordsList, response?.error || chrome.runtime.lastError?.message || t('words.loadFailed'));
       return;
     }
     wordsTotalInDb = Number(response.total) || 0;
@@ -1935,7 +2062,7 @@ function loadWordsFilter({ mode, letter = null, query = '', force = false } = {}
     wordsLoading = false;
     if (chrome.runtime.lastError || !response?.ok) {
       wordsBucket = [];
-      wordsList.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('words.loadFailed')}</div>`;
+      setEmptyMessage(wordsList, response?.error || chrome.runtime.lastError?.message || t('words.loadFailed'));
       wordsMeta.textContent = '';
       return;
     }
@@ -2301,7 +2428,7 @@ function loadStats(force) {
     if (chrome.runtime.lastError || !response?.ok) {
       statsHeatmap.dataset.loaded = '';
       statsMeta.textContent = '';
-      statsHeatmap.innerHTML = `<div class="words-empty">${response?.error || chrome.runtime.lastError?.message || t('stats.loadError')}</div>`;
+      setEmptyMessage(statsHeatmap, response?.error || chrome.runtime.lastError?.message || t('stats.loadError'));
       return;
     }
     statsHeatmap.dataset.loaded = period;
@@ -2335,7 +2462,7 @@ function loadLatency(force) {
     if (chrome.runtime.lastError || !response?.ok) {
       latencyLoaded = false;
       latencyMeta.textContent = '';
-      latencyChart.innerHTML = `<div class="latency-chart__empty">${response?.error || chrome.runtime.lastError?.message || t('err.latencyLoad')}</div>`;
+      setEmptyMessage(latencyChart, response?.error || chrome.runtime.lastError?.message || t('err.latencyLoad'), 'latency-chart__empty');
       return;
     }
     latencyLoaded = true;
@@ -2398,10 +2525,21 @@ function renderStats(stats) {
   fillStatsTable(statsTableBody, rows);
 }
 
+function setEmptyMessage(container, message, className = 'words-empty') {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  const el = document.createElement('div');
+  el.className = className;
+  el.textContent = String(message || '');
+  container.append(el);
+}
+
 function renderLatency(latency) {
   if (latency.error) {
     latencyMeta.textContent = '';
-    latencyChart.innerHTML = `<div class="latency-chart__empty">${latency.error}</div>`;
+    setEmptyMessage(latencyChart, latency.error, 'latency-chart__empty');
     latencyTableBody.innerHTML = '';
     return;
   }

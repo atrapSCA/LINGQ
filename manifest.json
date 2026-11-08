@@ -3,7 +3,7 @@
   "name": "LingQ Click Translator",
   "version": "0.3.10",
   "description": "Click any word on any web page to look up or create a LingQ and see its translation as a tooltip.",
-  "permissions": ["storage", "activeTab", "alarms", "clipboardWrite", "webNavigation"],
+  "permissions": ["storage", "tabs", "alarms", "clipboardWrite", "webNavigation"],
   "host_permissions": [
     "https://www.lingq.com/*",
     "https://lingq.com/*",
@@ -37,7 +37,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["role.js", "i18n.js", "content.js"],
+      "js": ["role.js", "sites.js", "import-lock.js", "i18n.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

@@ -28,6 +28,14 @@
         </div>
       </aside>
 
+      <aside class="import-alert" id="import-alert" hidden role="status">
+        <div class="import-alert__body">
+          <strong class="import-alert__title" data-i18n="import.alert.title">Probíhá import slovíček</strong>
+          <p class="import-alert__note" data-i18n="import.alert.highlightNote">Podbarvení slovíček je během importu vypnuté. Bez dokončeného importu by byla slovíčka podbarvená nesprávně (neúplná databáze).</p>
+          <p class="import-alert__eta" id="import-alert-eta" hidden></p>
+        </div>
+      </aside>
+
       <div class="status-card">
         <span class="status-dot" id="status-dot"></span>
         <div>
@@ -85,6 +93,8 @@
       <p class="mini__hint" data-i18n="popup.hint">Slovník, Import, Statistiky, Nastavení a Návod se otevřou na celé stránce.</p>
     </main>
     <script src="theme.js"></script>
+    <script src="sites.js"></script>
+    <script src="import-lock.js"></script>
     <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>

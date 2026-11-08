@@ -570,35 +570,44 @@
   color: #a33b3b;
 }
 
-/* Podbarvení: neznámé = modrá; 1 silná žlutá → 4 slabá; K bez barvy. Neuvnitř odkazů. */
+/* Podbarvení: neznámé = modrá; 1 silná žlutá → 4 slabá; K bez barvy.
+   Vždy tmavý text — na dark mode (Reddit) jinak bílá na žluté/modré nejde číst. */
 span.lingq-hl {
-  border-radius: 0.15em;
+  border-radius: 0.2em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  padding: 0.02em 0.06em;
-  color: inherit;
-  -webkit-text-fill-color: inherit;
+  padding: 0.06em 0.14em;
+  margin: 0 0.02em;
+  color: #121212 !important;
+  -webkit-text-fill-color: #121212 !important;
+  text-shadow: none !important;
   cursor: inherit;
+  mix-blend-mode: normal !important;
 }
 
 span.lingq-hl--new {
-  background-color: rgba(64, 148, 255, 0.42) !important;
+  background-color: #7eb6ff !important;
+  box-shadow: inset 0 0 0 1px rgba(20, 70, 140, 0.45);
 }
 
 span.lingq-hl--1 {
-  background-color: rgba(255, 196, 0, 0.72) !important;
+  background-color: #ffb400 !important;
+  box-shadow: inset 0 0 0 1px rgba(120, 70, 0, 0.4);
 }
 
 span.lingq-hl--2 {
-  background-color: rgba(255, 214, 40, 0.5) !important;
+  background-color: #ffc933 !important;
+  box-shadow: inset 0 0 0 1px rgba(120, 80, 0, 0.32);
 }
 
 span.lingq-hl--3 {
-  background-color: rgba(255, 228, 90, 0.32) !important;
+  background-color: #ffd966 !important;
+  box-shadow: inset 0 0 0 1px rgba(120, 90, 0, 0.26);
 }
 
 span.lingq-hl--4 {
-  background-color: rgba(255, 240, 150, 0.16) !important;
+  background-color: #ffe999 !important;
+  box-shadow: inset 0 0 0 1px rgba(120, 100, 0, 0.2);
 }
 
 /* Odkazy nesmí zůstat podbarvené (i když DOM vznikne až po highlightu). */
@@ -610,8 +619,42 @@ span.lingq-hl--4 {
 :is(a, a[href], area, [role="link"], [href]) span.lingq-hl--4 {
   background: none !important;
   background-color: transparent !important;
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
   padding: 0 !important;
+  margin: 0 !important;
   box-shadow: none !important;
+}
+
+/* Varování: import běží → podbarvení vypnuto. */
+#lingq-import-banner {
+  all: initial;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  z-index: 2147483645;
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 2px solid #c9a227;
+  background: #5c4a00;
+  color: #fff8e1;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
+#lingq-import-banner.lingq-import-banner--visible {
+  display: flex !important;
 }
 
 /* Fixní pruh nahoře — mimo tok stránky, nepřesouvá layout. */

@@ -15,9 +15,88 @@ const updateAlert = document.getElementById('update-alert');
 const updateAlertText = document.getElementById('update-alert-text');
 const updateAlertOpen = document.getElementById('update-alert-open');
 const updateAlertDismiss = document.getElementById('update-alert-dismiss');
+const importAlert = document.getElementById('import-alert');
+const importAlertEta = document.getElementById('import-alert-eta');
 let highlightPreference = true;
 let supabaseDbReady = false;
+let importLocksHighlight = false;
 let latestUpdateStatus = null;
+let importAlertTimer = 0;
+let currentSiteKey = '';
+let siteToggleAllowed = false;
+let enabledSites = [];
+const IMPORT_BATCH_WORK_MS = 12_000;
+
+function formatImportDuration(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(Number(ms) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+  }
+  if (minutes > 0) {
+    return `${minutes} min ${String(seconds).padStart(2, '0')} s`;
+  }
+  return `${seconds} s`;
+}
+
+function estimateImportRemainingMs(progress) {
+  if (!progress || progress.phase === 'done') {
+    return 0;
+  }
+  const batchSize = Math.max(1, Number(progress.batchSize) || 500);
+  const cooldownMs = Math.max(0, Number(progress.cooldownMs) || 5_000);
+  const workMs = Math.max(IMPORT_BATCH_WORK_MS, Number(progress.lastBatchDurationMs) || 0);
+  const perBatchMs = cooldownMs + workMs;
+  const cardsLeft = Math.max(0, (Number(progress.totalCards) || 0) - (Number(progress.importedCards) || 0));
+  const knownLeft = Math.max(0, (Number(progress.knownTotal) || 0) - (Number(progress.knownImported) || 0));
+  const knownTotal = Number(progress.knownTotal) || 0;
+  let batches = 0;
+  if (progress.phase === 'cards') {
+    batches = (cardsLeft > 0 ? Math.ceil(cardsLeft / batchSize) : 0)
+      + (knownTotal > 0 ? Math.ceil(knownTotal / batchSize) : 0);
+  } else if (progress.phase === 'known') {
+    batches = knownLeft > 0 ? Math.ceil(knownLeft / batchSize) : 0;
+  }
+  if (progress.running && batches > 0) {
+    batches -= 1;
+  }
+  const cooldownLeft = Math.max(0, (Number(progress.cooldownUntil) || 0) - Date.now());
+  return Math.max(0, batches * perBatchMs + cooldownLeft);
+}
+
+function formatImportEtaText(progress) {
+  if (!progress || progress.phase === 'done') {
+    return '';
+  }
+  const ms = estimateImportRemainingMs(progress);
+  return t('import.eta.remaining', { time: formatImportDuration(Math.max(ms, 1_000)) });
+}
+
+function renderImportAlert(progress) {
+  importLocksHighlight = isImportLockingHighlight(progress);
+  if (importAlert) {
+    importAlert.hidden = !importLocksHighlight;
+  }
+  if (importAlertEta) {
+    const etaText = importLocksHighlight ? formatImportEtaText(progress) : '';
+    importAlertEta.hidden = !etaText;
+    importAlertEta.textContent = etaText;
+  }
+  if (importAlertTimer) {
+    window.clearInterval(importAlertTimer);
+    importAlertTimer = 0;
+  }
+  if (importLocksHighlight && progress) {
+    importAlertTimer = window.setInterval(() => {
+      if (importAlertEta) {
+        importAlertEta.textContent = formatImportEtaText(progress);
+      }
+    }, 1000);
+  }
+  renderHighlight();
+}
 
 function t(key, vars) {
   return window.LingqI18n ? LingqI18n.t(key, vars) : key;
@@ -27,7 +106,7 @@ function refreshPopupTexts() {
   if (window.LingqI18n) {
     LingqI18n.apply();
   }
-  renderStatus(enabledInput.checked);
+  renderSiteStatus();
   renderHighlight();
   renderTheme(themeDarkInput.checked ? 'dark' : 'light', { skipApply: true });
   renderUpdateAlert(latestUpdateStatus);
@@ -74,10 +153,8 @@ updateAlertDismiss?.addEventListener('click', () => {
   }, (response) => {
     if (response?.ok) {
       renderUpdateAlert(response);
-    } else {
-      if (updateAlert) {
-        updateAlert.hidden = true;
-      }
+    } else if (updateAlert) {
+      updateAlert.hidden = true;
     }
   });
 });
@@ -99,22 +176,41 @@ LingqI18n.watch(() => {
   refreshPopupTexts();
 });
 
-chrome.storage.sync.get({ enabled: true, highlightEnabled: true }, (settings) => {
-  enabledInput.checked = settings.enabled !== false;
-  renderStatus(settings.enabled !== false);
-  highlightPreference = settings.highlightEnabled !== false;
-  highlightEnabledInput.checked = highlightPreference;
-  refreshSupabaseDbStatus();
-});
+function loadSiteToggleState() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs?.[0];
+    currentSiteKey = LingqSites.siteKeyFromUrl(tab?.url || '');
+    siteToggleAllowed = Boolean(currentSiteKey);
+    chrome.storage.sync.get({ enabledSites: [], highlightEnabled: true }, (settings) => {
+      enabledSites = Array.isArray(settings.enabledSites) ? settings.enabledSites : [];
+      highlightPreference = settings.highlightEnabled !== false;
+      renderSiteStatus();
+      renderHighlight();
+      refreshSupabaseDbStatus();
+      refreshImportLockStatus();
+    });
+  });
+}
+
+loadSiteToggleState();
 
 enabledInput.addEventListener('change', () => {
-  const enabled = enabledInput.checked;
-  chrome.storage.sync.set({ enabled });
-  renderStatus(enabled);
+  if (!siteToggleAllowed || !currentSiteKey) {
+    enabledInput.checked = false;
+    renderSiteStatus();
+    return;
+  }
+  const turnOn = enabledInput.checked;
+  enabledSites = turnOn
+    ? LingqSites.addEnabledSite(enabledSites, currentSiteKey)
+    : LingqSites.removeEnabledSite(enabledSites, currentSiteKey);
+  chrome.storage.sync.set({ enabledSites }, () => {
+    renderSiteStatus();
+  });
 });
 
 highlightEnabledInput.addEventListener('change', () => {
-  if (!supabaseDbReady) {
+  if (!supabaseDbReady || importLocksHighlight) {
     highlightEnabledInput.checked = false;
     renderHighlight();
     return;
@@ -130,6 +226,22 @@ function refreshSupabaseDbStatus() {
     renderHighlight();
   });
 }
+
+function refreshImportLockStatus() {
+  chrome.storage.local.get('knownWordsSync', (stored) => {
+    renderImportAlert(stored.knownWordsSync || null);
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.knownWordsSync) {
+    renderImportAlert(changes.knownWordsSync.newValue || null);
+  }
+  if (areaName === 'sync' && changes.enabledSites) {
+    enabledSites = Array.isArray(changes.enabledSites.newValue) ? changes.enabledSites.newValue : [];
+    renderSiteStatus();
+  }
+});
 
 themeDarkInput.addEventListener('change', () => {
   const theme = themeDarkInput.checked ? 'dark' : 'light';
@@ -148,21 +260,41 @@ openAppButton.addEventListener('click', () => {
   });
 });
 
-function renderStatus(enabled) {
-  statusTitle.textContent = enabled ? t('popup.status.onTitle') : t('popup.status.offTitle');
-  statusDescription.textContent = enabled ? t('popup.status.onDesc') : t('popup.status.offDesc');
-  statusDot.classList.toggle('is-off', !enabled);
+function renderSiteStatus() {
+  if (!siteToggleAllowed || !currentSiteKey) {
+    enabledInput.disabled = true;
+    enabledInput.checked = false;
+    statusTitle.textContent = t('popup.status.unavailableTitle');
+    statusDescription.textContent = t('popup.status.unavailableDesc');
+    statusDot.classList.add('is-off');
+    return;
+  }
+  const on = LingqSites.isHostEnabled(currentSiteKey, enabledSites);
+  enabledInput.disabled = false;
+  enabledInput.checked = on;
+  statusTitle.textContent = on ? t('popup.status.onTitle') : t('popup.status.offTitle');
+  statusDescription.textContent = on
+    ? t('popup.status.onDesc', { site: currentSiteKey })
+    : t('popup.status.offDesc', { site: currentSiteKey });
+  statusDot.classList.toggle('is-off', !on);
 }
 
 function renderHighlight() {
-  const available = supabaseDbReady;
+  const available = supabaseDbReady && !importLocksHighlight;
   const on = available && highlightPreference;
   highlightEnabledInput.disabled = !available;
   highlightEnabledInput.checked = on;
-  highlightCard?.classList.toggle('is-disabled', !available);
-  if (!available) {
+  highlightCard?.classList.toggle('is-disabled', !supabaseDbReady);
+  highlightCard?.classList.toggle('is-import-locked', importLocksHighlight);
+  if (!supabaseDbReady) {
     highlightTitle.textContent = t('popup.highlight.needDbTitle');
     highlightDescription.textContent = t('popup.highlight.needDbDesc');
+    highlightDot.classList.add('is-off');
+    return;
+  }
+  if (importLocksHighlight) {
+    highlightTitle.textContent = t('popup.highlight.importLockTitle');
+    highlightDescription.textContent = t('popup.highlight.importLockDesc');
     highlightDot.classList.add('is-off');
     return;
   }
