@@ -277,6 +277,16 @@ Verze 0.2.40
 - V Nastavení lze vypnout ChatGPT a Supabase DB; související volby a DB funkce se skryjí / vypnou.
 - Role buildu admin/user (role.js, set-role.ps1); oprava falešné chyby touch_word / update_word_fields při kontrole DB.
 
+Verze 0.3.11
+8. 11. 2026 07:23
+- Stabilní user release: zapnutí doplňku po webech (allowlist), bez DB.
+- Mini popup přepíná aktuální web; výchozí všude vypnuto; správa v Nastavení → Povolené weby.
+- Ikona: světle zelená na povoleném webu, šedá s červeným okrajem jinde.
+- Import LingQ: dávky po 500, pauza 5 s, ETA; během importu je podbarvení vypnuté a varování všude.
+- Čistá čísla se nepodbarvují a neotevírají bublinu; lepší čitelnost podbarvení na tmavém pozadí.
+- Bezpečnost: API klíče LingQ/ChatGPT/Supabase v chrome.storage.local (migrace ze sync); úklid mrtvého kódu.
+- Sdílené defaults.js, sites.js, import-lock.js.
+
 Verze 0.3.10
 7. 11. 2026 16:04
 - Stabilní user release: oprava úpravy překladu ve Slovníku (ukládání z app.html už není odmítnuto).
