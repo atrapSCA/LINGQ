@@ -38,6 +38,9 @@ let highlightBusyEl = null;
 let highlightBusyShowTimer = 0;
 let highlightBusyToken = 0;
 let loadingHintTimers = [];
+/** Kořeny čekající na podbarvení z MutationObserver (nesmí se zahodit při debounce). */
+const pendingHighlightRoots = new Set();
+let lastHighlightPathname = '';
 
 let i18nReady = Promise.resolve();
 
@@ -1059,13 +1062,22 @@ function schedulePageHighlight({ force = false, immediateBusy = false, settleRet
   }, force ? 50 : 250);
 }
 
-function scheduleHighlightAfterNavigation() {
+function scheduleHighlightAfterNavigation({ soft = false } = {}) {
   if (highlightBusyEl && !highlightBusyEl.isConnected) {
     highlightBusyEl = null;
   }
+  window.clearTimeout(scheduleHighlightAfterNavigation.timer);
+  if (soft) {
+    // Stejná cesta, jen search/query (typicky infinite scroll) — bez clear + busy pruhu.
+    scheduleHighlightAfterNavigation.timer = window.setTimeout(() => {
+      schedulePageHighlight({
+        settleRetries: [0, 500, 1200, 2400],
+      });
+    }, 200);
+    return;
+  }
   // Pruh hned; podbarvení několikrát po usazení DOM (Reddit SPA).
   beginHighlightBusy({ immediate: true });
-  window.clearTimeout(scheduleHighlightAfterNavigation.timer);
   scheduleHighlightAfterNavigation.timer = window.setTimeout(() => {
     schedulePageHighlight({
       immediateBusy: true,
@@ -1080,20 +1092,25 @@ function watchPageNavigation() {
   }
   watchPageNavigation.started = true;
   watchPageNavigation.lastKey = pageLocationKey();
+  watchPageNavigation.lastPathname = String(location.pathname || '');
 
   const onMaybeNavigate = () => {
     const nextKey = pageLocationKey();
     if (nextKey === watchPageNavigation.lastKey) {
       return;
     }
+    const nextPath = String(location.pathname || '');
+    const soft = nextPath === watchPageNavigation.lastPathname;
     watchPageNavigation.lastKey = nextKey;
-    scheduleHighlightAfterNavigation();
+    watchPageNavigation.lastPathname = nextPath;
+    scheduleHighlightAfterNavigation({ soft });
   };
 
   window.addEventListener('popstate', onMaybeNavigate);
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
       watchPageNavigation.lastKey = pageLocationKey();
+      watchPageNavigation.lastPathname = String(location.pathname || '');
       scheduleHighlightAfterNavigation();
     }
   });
@@ -1140,9 +1157,12 @@ chrome.runtime.onMessage.addListener((message) => {
     && now - (watchPageNavigation.lastExternalAt || 0) < 500) {
     return;
   }
+  const nextPath = String(location.pathname || '');
+  const soft = nextPath === watchPageNavigation.lastPathname;
   watchPageNavigation.lastKey = nextKey;
+  watchPageNavigation.lastPathname = nextPath;
   watchPageNavigation.lastExternalAt = now;
-  scheduleHighlightAfterNavigation();
+  scheduleHighlightAfterNavigation({ soft });
 });
 
 async function refreshPageHighlight({ force = false, immediateBusy = false, settleRetries = null } = {}) {
@@ -1150,7 +1170,9 @@ async function refreshPageHighlight({ force = false, immediateBusy = false, sett
     hideHighlightBusy();
     clearPageHighlights();
     stopHighlightObserver();
+    pendingHighlightRoots.clear();
     highlightMap = Object.create(null);
+    lastHighlightPathname = '';
     return;
   }
 
@@ -1215,7 +1237,15 @@ async function refreshPageHighlight({ force = false, immediateBusy = false, sett
           : Object.create(null);
         schedulePageHighlight.loadedOnce = true;
 
-        clearPageHighlights();
+        // Full clear jen při změně cesty / force. Reddit při scrollu mění search přes replaceState
+        // a clear by sundal barvy ze stále viditelných postů.
+        const pathname = String(location.pathname || '');
+        const pathChanged = pathname !== lastHighlightPathname;
+        if (runForce || pathChanged || !lastHighlightPathname) {
+          clearPageHighlights();
+        }
+        lastHighlightPathname = pathname;
+
         let previousDelay = 0;
         for (const delay of runRetries) {
           if (runId !== highlightRunId) {
@@ -1240,6 +1270,8 @@ async function refreshPageHighlight({ force = false, immediateBusy = false, sett
     } while (refreshPageHighlight.queued);
   } finally {
     refreshPageHighlight.running = false;
+    // Mutace během běhu obnovy se jen frontily — teď je zpracuj.
+    schedulePendingHighlightFlush(0);
   }
 }
 
@@ -1740,51 +1772,100 @@ function wrapHighlightedWords(textNode) {
   textNode.parentNode?.replaceChild(fragment, textNode);
 }
 
+function queueHighlightRoot(node) {
+  if (!node) {
+    return;
+  }
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (node.parentElement) {
+      pendingHighlightRoots.add(node.parentElement);
+    }
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return;
+  }
+  if (
+    node.classList?.contains(HIGHLIGHT_CLASS)
+    || node.id === TOOLTIP_ID
+    || node.id === 'lingq-highlight-busy'
+  ) {
+    return;
+  }
+  pendingHighlightRoots.add(node);
+}
+
+function schedulePendingHighlightFlush(delayMs = 350) {
+  window.clearTimeout(highlightMutationTimer);
+  if (!siteEnabled || !highlightEnabled || pendingHighlightRoots.size === 0) {
+    return;
+  }
+  highlightMutationTimer = window.setTimeout(() => {
+    flushPendingHighlightRoots().catch(() => {});
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function flushPendingHighlightRoots() {
+  if (!siteEnabled || !highlightEnabled) {
+    pendingHighlightRoots.clear();
+    return;
+  }
+  if (highlightApplying || refreshPageHighlight.running) {
+    schedulePendingHighlightFlush(250);
+    return;
+  }
+  if (pendingHighlightRoots.size === 0) {
+    return;
+  }
+
+  const roots = [...pendingHighlightRoots];
+  pendingHighlightRoots.clear();
+  const runId = highlightRunId;
+
+  for (const root of roots) {
+    if (runId !== highlightRunId) {
+      return;
+    }
+    if (!root?.isConnected) {
+      continue;
+    }
+    // Nový odkaz kolem už podbarveného textu → barvu zase sundat.
+    removeHighlightsInsideLinks(root);
+    if (isHighlightSkipped(root)) {
+      continue;
+    }
+    await applyHighlightsToRoot(root, runId);
+  }
+
+  // Během flush přibyly další uzly.
+  if (pendingHighlightRoots.size > 0 && runId === highlightRunId) {
+    schedulePendingHighlightFlush(200);
+  }
+}
+
 function startHighlightObserver() {
   if (highlightObserver || !document.body) {
     return;
   }
   highlightObserver = new MutationObserver((mutations) => {
-    if (highlightApplying || !siteEnabled || !highlightEnabled || refreshPageHighlight.running) {
+    if (!siteEnabled || !highlightEnabled) {
       return;
     }
-    const roots = [];
+    let added = false;
     for (const mutation of mutations) {
       mutation.addedNodes.forEach((node) => {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          if (
-            node.classList?.contains(HIGHLIGHT_CLASS)
-            || node.id === TOOLTIP_ID
-            || node.id === 'lingq-highlight-busy'
-          ) {
-            return;
-          }
-          roots.push(node);
-        } else if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
-          roots.push(node.parentElement);
+        const before = pendingHighlightRoots.size;
+        queueHighlightRoot(node);
+        if (pendingHighlightRoots.size > before) {
+          added = true;
         }
       });
     }
-    if (roots.length === 0) {
+    if (!added) {
       return;
     }
-    window.clearTimeout(highlightMutationTimer);
-    highlightMutationTimer = window.setTimeout(() => {
-      if (highlightApplying || refreshPageHighlight.running) {
-        return;
-      }
-      const runId = highlightRunId;
-      roots.forEach((root) => {
-        if (!root.isConnected) {
-          return;
-        }
-        // Nový odkaz kolem už podbarveného textu → barvu zase sundat.
-        removeHighlightsInsideLinks(root);
-        if (!isHighlightSkipped(root)) {
-          applyHighlightsToRoot(root, runId).catch(() => {});
-        }
-      });
-    }, 400);
+    // Během full refresh jen frontuj — flush po doběhu / debounce.
+    schedulePendingHighlightFlush(refreshPageHighlight.running || highlightApplying ? 450 : 350);
   });
   highlightObserver.observe(document.documentElement, {
     childList: true,
@@ -1798,6 +1879,7 @@ function stopHighlightObserver() {
     highlightObserver = null;
   }
   window.clearTimeout(highlightMutationTimer);
+  pendingHighlightRoots.clear();
 }
 
 watchPageNavigation();
