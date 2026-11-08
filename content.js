@@ -16,7 +16,7 @@ const HIGHLIGHT_SKIP_TAGS = new Set([
   'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION',
   'CODE', 'PRE', 'SVG', 'MATH', 'IFRAME', 'OBJECT', 'VIDEO', 'AUDIO', 'CANVAS',
   'HEAD', 'TITLE', 'META', 'LINK', 'BR', 'HR', 'IMG', 'PICTURE', 'SOURCE',
-  'A',
+  'A', 'BUTTON', 'SUMMARY', 'LABEL',
 ]);
 let siteEnabled = false;
 let enabledSites = [];
@@ -1472,6 +1472,10 @@ function isLinkElement(el) {
   if (el.hasAttribute?.('href')) {
     return true;
   }
+  // YouTube: odkazy často jako <a class="yt-simple-endpoint"> nebo custom s tou třídou.
+  if (el.classList?.contains('yt-simple-endpoint')) {
+    return true;
+  }
   const name = String(el.localName || '').toLowerCase();
   if (
     name.endsWith('-link')
@@ -1480,6 +1484,119 @@ function isLinkElement(el) {
     || name.includes('faceplate-tracker')
   ) {
     return true;
+  }
+  return false;
+}
+
+/** YouTube „Odpovědět“ a podobná UI tlačítka — nepodbarvovat, nejde ignorovat přes bublinu. */
+function isInteractiveControl(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE) {
+    return false;
+  }
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'BUTTON' || tag === 'SUMMARY' || tag === 'LABEL') {
+    return true;
+  }
+  const role = String(el.getAttribute?.('role') || '').toLowerCase();
+  if (
+    role === 'button'
+    || role === 'tab'
+    || role === 'menuitem'
+    || role === 'switch'
+    || role === 'checkbox'
+    || role === 'radio'
+    || role === 'option'
+  ) {
+    return true;
+  }
+  const name = String(el.localName || '').toLowerCase();
+  if (
+    name.includes('button')
+    || name.endsWith('-btn')
+    || name.includes('icon-button')
+    || name === 'yt-button-shape'
+    || name === 'yt-button-renderer'
+  ) {
+    return true;
+  }
+  const id = String(el.id || '').toLowerCase();
+  if (
+    id === 'reply-button'
+    || id === 'reply-button-end'
+    || id.includes('reply-button')
+    || id === 'more-replies-button'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isInsideInteractiveControl(node) {
+  let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  let depth = 0;
+  while (el && depth < 40) {
+    if (isInteractiveControl(el)) {
+      return true;
+    }
+    el = composedParent(el);
+    depth += 1;
+  }
+  return false;
+}
+
+/**
+ * YouTube postranní „další videa“: metadata (tis. zhlédnutí, kanál) často není přímo v <a>,
+ * ale klik stejně naviguje — podbarvení tam překáží a nejde ignorovat.
+ */
+function isYouTubeNavChrome(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE) {
+    return false;
+  }
+  const name = String(el.localName || '').toLowerCase();
+  if (
+    name === 'ytd-compact-video-renderer'
+    || name === 'ytd-compact-playlist-renderer'
+    || name === 'ytd-compact-movie-renderer'
+    || name === 'ytd-compact-radio-renderer'
+    || name === 'ytd-playlist-panel-video-renderer'
+    || name === 'ytd-video-meta-block'
+    || name === 'ytd-channel-name'
+    || name === 'yt-lockup-view-model'
+    || name === 'yt-lockup-metadata-view-model'
+    || name === 'yt-content-metadata-view-model'
+    || name.startsWith('yt-lockup-')
+  ) {
+    return true;
+  }
+  const id = String(el.id || '');
+  if (
+    id === 'metadata-line'
+    || id === 'video-title-link'
+    || id === 'placeholder-area'
+    || id === 'simple-box'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isInsideYouTubeNavChrome(node) {
+  let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  let depth = 0;
+  while (el && depth < 40) {
+    if (isYouTubeNavChrome(el)) {
+      return true;
+    }
+    // Related feed: jakýkoli renderer karty ve secondary results.
+    const name = String(el.localName || '').toLowerCase();
+    if (
+      (name.includes('compact') && name.endsWith('-renderer'))
+      || name.includes('lockup')
+    ) {
+      return true;
+    }
+    el = composedParent(el);
+    depth += 1;
   }
   return false;
 }
@@ -1640,7 +1757,7 @@ function removeHighlightsInsideLinks(root = document) {
   highlightApplying = true;
   try {
     spans.forEach((span) => {
-      if (isInsideLink(span)) {
+      if (isInsideLink(span) || isInsideInteractiveControl(span) || isInsideYouTubeNavChrome(span)) {
         unwrapHighlightSpan(span);
       }
     });
@@ -1651,7 +1768,7 @@ function removeHighlightsInsideLinks(root = document) {
 
 function isHighlightSkipped(node) {
   let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-  if (isInsideLink(node)) {
+  if (isInsideLink(node) || isInsideInteractiveControl(node) || isInsideYouTubeNavChrome(node)) {
     return true;
   }
   while (el) {
@@ -1665,7 +1782,7 @@ function isHighlightSkipped(node) {
     if (el.isContentEditable || el.getAttribute?.('contenteditable') === 'true') {
       return true;
     }
-    el = el.parentElement;
+    el = composedParent(el) || el.parentElement;
   }
   return false;
 }
